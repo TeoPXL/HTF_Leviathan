@@ -5,6 +5,7 @@ import { drizzle } from "drizzle-orm/mysql2"
 import { generalRoutes } from "./routes/general"
 import { chaosMiddleware } from "./middleware/chaos"
 import { setupDatabase } from "./db/connect"
+import {voyagesRoutes} from "./routes/coords"
 
 // Drizzle database instance
 let db: ReturnType<typeof drizzle>
@@ -22,6 +23,7 @@ let db: ReturnType<typeof drizzle>
             .get("/health", () => "Healthy")
 
         // Pass the db & logger to the routes
+        voyagesRoutes(app, db)
         generalRoutes(app, db)
 
         // Start the server
