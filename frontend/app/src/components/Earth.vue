@@ -1,6 +1,6 @@
 <script setup>
 import Globe from "globe.gl";
-import { ref, computed, watch, onMounted } from "vue";
+import { ref, computed, watch, onMounted, nextTick } from "vue";
 
 // ────────────────────────────────────────────────────────────────
 // State & Refs
@@ -17,32 +17,53 @@ const selectedEvent = ref(null);
 const allPaths = ref([]); // Store processed paths for filtering
 let animationFrame = null;
 
-// ────────────────────────────────────────────────────────────────
-// FIX 1: Random bright colors for each voyage
-// ────────────────────────────────────────────────────────────────
+// ─────────────────────────────────════════════════───────────────
+// FIX 1: Random bright colors for each voyage (ENHANCED with caching)
+// ─────────────────────────────────════════════════───────────────
+const voyageColorCache = new Map(); // Cache colors per voyage ID
+
 function ensureVisibleColor(voyageId) {
+  // Return cached color if available
+  if (voyageColorCache.has(voyageId)) {
+    return voyageColorCache.get(voyageId);
+  }
+
   // Generate random hue (0-360) for bright, distinct colors
   const hue = Math.floor(Math.random() * 360);
-  return `hsl(${hue}, 85%, 60%)`; // High saturation, good visibility on dark globe
+  const color = `hsl(${hue}, 85%, 60%)`; // High saturation, good visibility on dark globe
+
+  // Cache the color
+  voyageColorCache.set(voyageId, color);
+  return color;
 }
 
 // ────────────────────────────────────────────────────────────────
-// Voyage Selection
+// Voyage Selection (ENHANCED with better error handling)
 // ────────────────────────────────────────────────────────────────
 async function selectVoyage(voyageId) {
-  const fullId = `voyage-${voyageId}`;
-  selectedVoyage.value = fullId;
-  isPlaying.value = false;
-  currentEventIndex.value = 0;
-  selectedEvent.value = null;
-  showVoyageList.value = false;
+  try {
+    const fullId = `voyage-${voyageId}`;
+    selectedVoyage.value = fullId;
+    isPlaying.value = false;
+    currentEventIndex.value = 0;
+    selectedEvent.value = null;
+    showVoyageList.value = false;
 
-  const res = await fetch(`/api/v1/voyages/${voyageId}/details`);
-  voyageDetails.value = await res.json();
+    const res = await fetch(`/api/v1/voyages/${voyageId}/details`);
+    if (!res.ok) throw new Error(`Failed to fetch voyage details: ${res.status}`);
 
-  const startCoords = selectedPath.value.geometry.coordinates[0][0];
-  if (myGlobe.value && startCoords) {
-    myGlobe.value.pointOfView({ lat: startCoords[1], lng: startCoords[0], altitude: 1.5 }, 1000);
+    voyageDetails.value = await res.json();
+
+    // FIX: Ensure globe and path exist before camera movement
+    await nextTick();
+    const startCoords = selectedPath.value?.geometry?.coordinates?.[0]?.[0];
+    if (myGlobe.value && startCoords && Array.isArray(startCoords) && startCoords.length >= 2) {
+      myGlobe.value.pointOfView({ lat: startCoords[1], lng: startCoords[0], altitude: 1.5 }, 1000);
+    }
+  } catch (error) {
+    console.error("Error selecting voyage:", error);
+    // Reset on error
+    exitSelection();
   }
 }
 
@@ -54,8 +75,11 @@ function exitSelection() {
   selectedEvent.value = null;
   showVoyageList.value = true;
 
+  // FIX: Explicitly clear markers and reset view
   if (myGlobe.value) {
     myGlobe.value.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1000);
+    // Clear all HTML elements (markers) immediately
+    myGlobe.value.htmlElementsData([]);
   }
 }
 
@@ -70,36 +94,44 @@ function correctLngWrap(lng1, lng2) {
 }
 
 // ────────────────────────────────────────────────────────────────
-// Core Logic (keep existing computed/watchers)
+// Core Logic (ENHANCED with defensive checks)
 // ────────────────────────────────────────────────────────────────
 watch(currentEventIndex, (newVal) => {
-  if (typeof newVal === "string") {
-    currentEventIndex.value = Number(newVal);
+  const numVal = Number(newVal);
+  if (!isNaN(numVal) && numVal !== newVal) {
+    currentEventIndex.value = numVal;
   }
 });
 
 const selectedPath = computed(() => {
-  if (!selectedVoyage.value || !geoData.value) return null;
-  return geoData.value.features.find(f => f.properties.id === selectedVoyage.value);
+  if (!selectedVoyage.value || !geoData.value?.features) return null;
+  return geoData.value.features.find(f => f?.properties?.id === selectedVoyage.value);
 });
 
 const interpolatedPosition = computed(() => {
-  if (!selectedPath.value) return null;
-  const coords = selectedPath.value.geometry.coordinates[0];
-  if (!coords.length) return null;
+  if (!selectedPath.value?.geometry?.coordinates) return null;
 
-  const index = Number(currentEventIndex.value);
+  const coords = selectedPath.value.geometry.coordinates[0];
+  if (!Array.isArray(coords) || coords.length === 0) return null;
+
+  const index = Number(currentEventIndex.value) || 0;
   const maxIndex = coords.length - 1;
   const clampedIndex = Math.max(0, Math.min(index, maxIndex));
 
   const floor = Math.floor(clampedIndex);
   const ceil = Math.min(Math.ceil(clampedIndex), maxIndex);
 
-  if (!coords[floor] || !coords[ceil]) return null;
-  if (floor === ceil) return coords[floor];
+  const coordFloor = coords[floor];
+  const coordCeil = coords[ceil];
 
-  const [lng1, lat1] = coords[floor];
-  const [lng2, lat2] = coords[ceil];
+  if (!coordFloor || !coordCeil || !Array.isArray(coordFloor) || !Array.isArray(coordCeil)) return null;
+  if (floor === ceil) return coordFloor;
+
+  const [lng1, lat1] = coordFloor;
+  const [lng2, lat2] = coordCeil;
+
+  if (typeof lng1 !== 'number' || typeof lat1 !== 'number' || typeof lng2 !== 'number' || typeof lat2 !== 'number') return null;
+
   const fraction = clampedIndex - floor;
 
   const correctedLng2 = correctLngWrap(lng1, lng2);
@@ -111,19 +143,26 @@ const interpolatedPosition = computed(() => {
 
 const currentDateDisplay = computed(() => {
   if (!voyageDetails.value?.events?.length) return "";
+
   const events = voyageDetails.value.events;
-  const index = Number(currentEventIndex.value);
+  const index = Number(currentEventIndex.value) || 0;
   const maxIndex = events.length - 1;
   const clampedIndex = Math.max(0, Math.min(index, maxIndex));
 
   const floor = Math.floor(clampedIndex);
   const ceil = Math.min(Math.ceil(clampedIndex), maxIndex);
 
-  if (!events[floor] || !events[ceil]) return "";
-  if (floor === ceil) return new Date(events[floor].date).toLocaleDateString();
+  const eventFloor = events[floor];
+  const eventCeil = events[ceil];
 
-  const date1 = new Date(events[floor].date).getTime();
-  const date2 = new Date(events[ceil].date).getTime();
+  if (!eventFloor || !eventCeil) return "";
+  if (floor === ceil) return new Date(eventFloor.date).toLocaleDateString();
+
+  const date1 = new Date(eventFloor.date).getTime();
+  const date2 = new Date(eventCeil.date).getTime();
+
+  if (isNaN(date1) || isNaN(date2)) return "";
+
   const fraction = clampedIndex - floor;
   const interpolated = date1 + (date2 - date1) * fraction;
 
@@ -138,7 +177,8 @@ function togglePlay() {
 }
 
 function animate() {
-  if (!isPlaying.value || !voyageDetails.value) return;
+  if (!isPlaying.value || !voyageDetails.value?.events?.length) return;
+
   const totalSteps = voyageDetails.value.events.length - 1;
   // CHANGED: 4x slower animation (0.01 / 4 = 0.0025)
   currentEventIndex.value = Number(currentEventIndex.value) + 0.0025;
@@ -152,7 +192,7 @@ function animate() {
 
 watch(isPlaying, (playing) => {
   if (playing) animate();
-  else cancelAnimationFrame(animationFrame);
+  else if (animationFrame) cancelAnimationFrame(animationFrame);
 });
 
 // MODIFIED: 3x more zoomed in when playing (0.5 / 3 ≈ 0.1667)
@@ -163,10 +203,12 @@ watch([interpolatedPosition, isPlaying], ([pos, playing]) => {
 });
 
 // ────────────────────────────────────────────────────────────────
-// Event Actions (keep existing)
+// Event Actions (ENHANCED)
 // ────────────────────────────────────────────────────────────────
 function showEventDetails(event) {
-  selectedEvent.value = event;
+  if (event?.activity) {
+    selectedEvent.value = event;
+  }
 }
 
 function closeEventDetails() {
@@ -174,48 +216,57 @@ function closeEventDetails() {
 }
 
 // ────────────────────────────────────────────────────────────────
-// Voyage List Sidebar (keep existing)
+// Voyage List Sidebar (ENHANCED)
 // ────────────────────────────────────────────────────────────────
 const voyageList = computed(() => {
-  if (!geoData.value) return [];
-  return geoData.value.features.map(feature => ({
-    id: feature.properties.id,
-    name: feature.properties.name,
-    shipName: feature.properties.shipName,
-    color: feature.properties.color
-  }));
+  if (!geoData.value?.features) return [];
+
+  return geoData.value.features
+    .filter(feature => feature?.properties?.id && feature?.properties?.name)
+    .map(feature => ({
+      id: feature.properties.id,
+      name: feature.properties.name,
+      shipName: feature.properties.shipName || 'Unknown Ship',
+      color: feature.properties.color || '#5eead4'
+    }));
 });
 
 // ────────────────────────────────────────────────────────────────
-// FIX 3: Path filtering logic
+// FIX 3: Path filtering logic (ENHANCED with null checks)
 // ────────────────────────────────────────────────────────────────
 watch(selectedVoyage, (newVoyageId) => {
-  if (!myGlobe.value || !allPaths.value.length) return;
+  if (!myGlobe.value || !allPaths.value?.length) {
+    console.warn("Globe or paths not ready for update");
+    return;
+  }
 
-  // Show only selected path when a voyage is active, otherwise show all
-  const pathsToShow = newVoyageId
-    ? allPaths.value.filter(p => p.properties.id === newVoyageId)
-    : allPaths.value;
+  try {
+    // Show only selected path when a voyage is active, otherwise show all
+    const pathsToShow = newVoyageId
+      ? allPaths.value.filter(p => p?.properties?.id === newVoyageId)
+      : allPaths.value;
 
-  myGlobe.value
-    .pathsData(pathsToShow)
-    .pathPoints("coords")
-    .pathPointLat(p => p[1])
-    .pathPointLng(p => p[0])
-    .pathColor(path => path.properties.color)
-    .pathLabel(path => path.properties.name)
-    .pathStroke(1.5)
-    .pathDashLength(0.05)
-    .pathDashGap(0.02)
-    .pathDashAnimateTime(12000);
+    myGlobe.value
+      .pathsData(pathsToShow)
+      .pathPoints("coords")
+      .pathPointLat(p => Array.isArray(p) && p.length >= 2 ? p[1] : 0)
+      .pathPointLng(p => Array.isArray(p) && p.length >= 2 ? p[0] : 0)
+      .pathColor(path => path?.properties?.color || '#5eead4')
+      .pathLabel(path => path?.properties?.name || 'Unnamed Voyage')
+      .pathStroke(1.5)
+      .pathDashLength(0.05)
+      .pathDashGap(0.02)
+      .pathDashAnimateTime(12000);
+  } catch (error) {
+    console.error("Error updating path display:", error);
+  }
 });
 
-
 // ────────────────────────────────────────────────────────────────
-// Weather Display Logic
+// Weather Display Logic (ENHANCED)
 // ────────────────────────────────────────────────────────────────
 function getWeatherEmoji(weather) {
-  if (!weather) return '🌡️';
+  if (!weather || typeof weather !== 'string') return '🌡️';
 
   const weatherLower = weather.toLowerCase();
   const emojiMap = {
@@ -241,7 +292,7 @@ const currentWeatherEvent = computed(() => {
   if (!voyageDetails.value?.events?.length) return null;
 
   const events = voyageDetails.value.events;
-  const index = Number(currentEventIndex.value);
+  const index = Number(currentEventIndex.value) || 0;
   const nearestIndex = Math.round(index);
   const clampedIndex = Math.max(0, Math.min(nearestIndex, events.length - 1));
 
@@ -249,73 +300,122 @@ const currentWeatherEvent = computed(() => {
 });
 
 // ────────────────────────────────────────────────────────────────
-// FIX 4: Initialize globe with random colors and store paths
+// FIX 4: Initialize globe with random colors and store paths (ENHANCED)
 // ────────────────────────────────────────────────────────────────
 onMounted(async () => {
-  myGlobe.value = Globe()(globeDiv.value)
-    .globeImageUrl("//unpkg.com/three-globe/example/img/earth-night.jpg")
-    .bumpImageUrl("//unpkg.com/three-globe/example/img/earth-topology.png")
-    .backgroundImageUrl("//unpkg.com/three-globe/example/img/night-sky.png")
-    .showAtmosphere(true)
-    .atmosphereColor('#3a228a')
-    .atmosphereAltitude(0.2);
+  try {
+    if (!globeDiv.value) {
+      throw new Error("Globe container not found");
+    }
 
-  const res = await fetch("/api/v1/voyages-geo");
-  geoData.value = await res.json();
+    myGlobe.value = Globe()(globeDiv.value)
+      .globeImageUrl("//unpkg.com/three-globe/example/img/earth-night.jpg")
+      .bumpImageUrl("//unpkg.com/three-globe/example/img/earth-topology.png")
+      .backgroundImageUrl("//unpkg.com/three-globe/example/img/night-sky.png")
+      .showAtmosphere(true)
+      .atmosphereColor('#3a228a')
+      .atmosphereAltitude(0.2);
 
-  // Process and store all paths with random colors
-  allPaths.value = geoData.value.features
-    .map(feature => {
-      const coords = feature.geometry.coordinates[0].filter(
-        coord => coord && typeof coord[0] === 'number' && typeof coord[1] === 'number'
-      );
+    const res = await fetch("/api/v1/voyages-geo");
+    if (!res.ok) throw new Error(`Failed to fetch geo data: ${res.status}`);
 
-      if (coords.length < 2) return null;
+    const data = await res.json();
 
-      // Assign random bright color
-      feature.properties.color = ensureVisibleColor(feature.properties.id);
+    // FIX: Validate data structure before assignment
+    if (!data || !Array.isArray(data.features)) {
+      throw new Error("Invalid geo data structure");
+    }
 
-      return {
-        coords,
-        properties: feature.properties,
-      };
-    })
-    .filter(Boolean);
+    geoData.value = data;
 
-  // Initial render with all paths
-  myGlobe.value
-    .pathsData(allPaths.value)
-    .pathPoints("coords")
-    .pathPointLat(p => p[1])
-    .pathPointLng(p => p[0])
-    .pathColor(path => path.properties.color)
-    .pathLabel(path => path.properties.name)
-    .pathStroke(1.5)
-    .pathDashLength(0.05)
-    .pathDashGap(0.02)
-    .pathDashAnimateTime(12000)
-    .onPathClick(path => selectVoyage(path.properties.id.replace('voyage-', '')));
+    // Process and store all paths with random colors
+    allPaths.value = geoData.value.features
+      .filter(feature => {
+        // FIX: Validate feature structure
+        const isValid = feature?.geometry?.coordinates?.[0]?.length >= 2 &&
+          feature?.properties?.id &&
+          Array.isArray(feature.geometry.coordinates[0]);
+
+        if (!isValid) {
+          console.warn("Invalid feature skipped:", feature?.properties?.id);
+        }
+
+        return isValid;
+      })
+      .map(feature => {
+        const coords = feature.geometry.coordinates[0].filter(
+          coord => Array.isArray(coord) &&
+            coord.length >= 2 &&
+            typeof coord[0] === 'number' &&
+            typeof coord[1] === 'number' &&
+            !isNaN(coord[0]) &&
+            !isNaN(coord[1])
+        );
+
+        // Assign random bright color
+        feature.properties.color = ensureVisibleColor(feature.properties.id);
+
+        return {
+          coords,
+          properties: feature.properties,
+        };
+      })
+      .filter(Boolean); // Remove null entries
+
+    // Wait for DOM update before rendering paths
+    await nextTick();
+
+    // FIX: Double-check globe is still available
+    if (myGlobe.value) {
+      myGlobe.value
+        .pathsData(allPaths.value)
+        .pathPoints("coords")
+        .pathPointLat(p => Array.isArray(p) && p.length >= 2 ? p[1] : 0)
+        .pathPointLng(p => Array.isArray(p) && p.length >= 2 ? p[0] : 0)
+        .pathColor(path => path?.properties?.color || '#5eead4')
+        .pathLabel(path => path?.properties?.name || 'Unnamed Voyage')
+        .pathStroke(1.5)
+        .pathDashLength(0.05)
+        .pathDashGap(0.02)
+        .pathDashAnimateTime(12000)
+        .onPathClick(path => {
+          if (path?.properties?.id) {
+            selectVoyage(path.properties.id.replace('voyage-', ''));
+          }
+        });
+    }
+  } catch (error) {
+    console.error("Error initializing globe:", error);
+  }
 });
 
 // ────────────────────────────────────────────────────────────────
-// Markers & Boat Updates (keep existing)
+// Markers & Boat Updates (FIXED: Now clears markers on exit)
 // ────────────────────────────────────────────────────────────────
 watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) => {
-  if (!details || !globe) return;
+  if (!globe) return; // Globe must exist
 
-  const markers = details.events.map(event => ({
-    lat: event.latitude,
-    lng: event.longitude,
-    activity: event.activity,
-    weather: event.weather,
-    date: event.date,
-    type: 'event',
-    hasDetails: !!(event.description || event.specialOccurrence),
-    description: event.description || '',
-    special: event.specialOccurrence || ''
-  }));
+  // FIX: Explicitly clear markers when no details (on exit)
+  if (!details || !details.events?.length) {
+    globe.htmlElementsData([]);
+    return;
+  }
 
-  if (pos) {
+  const markers = details.events
+    .filter(event => event && typeof event.latitude === 'number' && typeof event.longitude === 'number')
+    .map(event => ({
+      lat: event.latitude,
+      lng: event.longitude,
+      activity: event.activity || 'Unknown Activity',
+      weather: event.weather,
+      date: event.date,
+      type: 'event',
+      hasDetails: !!(event.description || event.specialOccurrence),
+      description: event.description || '',
+      special: event.specialOccurrence || ''
+    }));
+
+  if (pos && Array.isArray(pos) && pos.length >= 2) {
     markers.push({
       lat: pos[1],
       lng: pos[0],
@@ -344,13 +444,37 @@ watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) =>
         return el;
       }
     })
-    .htmlLat(d => d.lat)   // Use .htmlLat()
-    .htmlLng(d => d.lng);  // Use .htmlLng()
+    .htmlLat(d => typeof d.lat === 'number' ? d.lat : 0)
+    .htmlLng(d => typeof d.lng === 'number' ? d.lng : 0);
+});
+
+// ────────────────────────────────────────────────────────────────
+// ADDITIONAL FIX: Watch for globe readiness to ensure paths render
+// ────────────────────────────────────────────────────────────────
+watch([myGlobe, allPaths], ([globe, paths]) => {
+  if (globe && paths?.length && !selectedVoyage.value) {
+    // Re-render all paths when globe becomes ready
+    try {
+      globe.pathsData(paths)
+        .pathPoints("coords")
+        .pathPointLat(p => Array.isArray(p) && p.length >= 2 ? p[1] : 0)
+        .pathPointLng(p => Array.isArray(p) && p.length >= 2 ? p[0] : 0)
+        .pathColor(path => path?.properties?.color || '#5eead4')
+        .pathLabel(path => path?.properties?.name || 'Unnamed Voyage')
+        .pathStroke(1.5)
+        .pathDashLength(0.05)
+        .pathDashGap(0.02)
+        .pathDashAnimateTime(12000);
+    } catch (error) {
+      console.error("Error in globe readiness watcher:", error);
+    }
+  }
 });
 </script>
 
 <template>
   <div ref="globeDiv" class="globe-container"></div>
+
   <!-- Weather Display -->
   <div v-if="selectedVoyage && currentWeatherEvent" class="weather-display">
     <div class="weather-emoji">{{ getWeatherEmoji(currentWeatherEvent.weather) }}</div>
@@ -362,6 +486,7 @@ watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) =>
       <div class="weather-date">{{ new Date(currentWeatherEvent.date).toLocaleDateString() }}</div>
     </div>
   </div>
+
   <!-- Voyage List Sidebar -->
   <div class="voyage-list-panel" :class="{ 'mobile-hidden': !showVoyageList && selectedVoyage }">
     <div class="panel-header">
@@ -391,30 +516,33 @@ watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) =>
     </div>
   </div>
 
-  <!-- FIX 3: Exit Button with higher z-index and visible styling -->
+  <!-- Exit Button -->
   <button v-if="selectedVoyage" @click="exitSelection" class="exit-btn">
     ✕ Exit Voyage
   </button>
 
   <!-- Voyage Info Panel -->
   <div v-if="selectedVoyage && voyageDetails" class="info-panel">
-    <h3>{{ voyageDetails.ship.shipName }}</h3>
-    <p class="route">{{ voyageDetails.voyage.startingPort }} → {{ voyageDetails.voyage.destinationPort }}</p>
-    <p class="detail">Captain: {{ voyageDetails.voyage.captainName }}</p>
-    <p class="detail">Crew Count: {{ voyageDetails.voyage.crewCount }}</p>
-    <p class="detail">Casualties: {{ voyageDetails.voyage.casualties }}</p>
-    <p class="detail">Start Date: {{ new Date(voyageDetails.voyage.startDate).toLocaleDateString() }}</p>
+    <h3>{{ voyageDetails.ship?.shipName || 'Unknown Ship' }}</h3>
+    <p class="route">
+      {{ voyageDetails.voyage?.startingPort || 'Unknown' }} →
+      {{ voyageDetails.voyage?.destinationPort || 'Unknown' }}
+    </p>
+    <p class="detail">Captain: {{ voyageDetails.voyage?.captainName || 'Unknown' }}</p>
+    <p class="detail">Crew Count: {{ voyageDetails.voyage?.crewCount ?? 'N/A' }}</p>
+    <p class="detail">Casualties: {{ voyageDetails.voyage?.casualties ?? 'N/A' }}</p>
+    <p class="detail">Start Date: {{ voyageDetails.voyage?.startDate ? new Date(voyageDetails.voyage.startDate).toLocaleDateString() : 'Unknown' }}</p>
   </div>
 
   <!-- Timeline Controls -->
-  <div v-if="selectedVoyage && voyageDetails" class="timeline-controls">
+  <div v-if="selectedVoyage && voyageDetails?.events?.length" class="timeline-controls">
     <button @click="togglePlay" class="play-btn">
       {{ isPlaying ? '⏸️' : '▶️' }}
     </button>
     <input
       type="range"
       min="0"
-      :max="voyageDetails.events.length - 1"
+      :max="(voyageDetails.events.length - 1) || 0"
       v-model.number="currentEventIndex"
       step="0.01"
       class="timeline-slider"
@@ -436,6 +564,7 @@ watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) =>
 </template>
 
 <style>
+/* All styles remain the same as in original code */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -554,7 +683,7 @@ body {
   text-overflow: ellipsis;
 }
 
-/* FIX 3: Exit Button - moved to top-right with high z-index */
+/* Exit Button */
 .exit-btn {
   position: absolute;
   top: 20px;
