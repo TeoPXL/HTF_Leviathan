@@ -1,6 +1,6 @@
 <script setup>
 import Globe from "globe.gl";
-import { ref, computed, watch, onMounted, nextTick } from "vue";
+import { ref, computed, watch, onMounted, nextTick, onUnmounted } from "vue"; // ✅ Added onUnmounted
 
 // ────────────────────────────────────────────────────────────────
 // State & Refs
@@ -20,6 +20,178 @@ let animationFrame = null;
 
 // NEW: Centralized path animation speed (slower = higher number)
 const PATH_ANIMATION_TIME = 20000; // 20 seconds per cycle (was 12000)
+
+// NEW: Chat state
+const showChat = ref(false);
+const chatMessages = ref([]);
+const chatInput = ref("");
+const isLoadingChat = ref(false);
+const isLoadingVoyages = ref(true); // ✅ ADD loading state for initial data
+
+// ✅ ENHANCE sendChatMessage with validation
+async function sendChatMessage() {
+  // Validate input
+  if (!chatInput.value?.trim()) {
+    chatInput.value = '';
+    return;
+  }
+
+  // Validate voyage selection
+  if (!selectedVoyage.value) {
+    chatMessages.value.push({
+      id: Date.now(),
+      role: 'assistant',
+      content: "⚠️ Please select a voyage first.",
+      timestamp: new Date().toISOString()
+    });
+    nextTick(scrollToBottom);
+    return;
+  }
+
+  // Prevent chat during playback
+  if (isPlaying.value) {
+    chatMessages.value.push({
+      id: Date.now(),
+      role: 'assistant',
+      content: "⏸️ Chat is disabled during playback. Pause the journey first.",
+      timestamp: new Date().toISOString()
+    });
+    nextTick(scrollToBottom);
+    return;
+  }
+
+  // Validate voyage ID format
+  const voyageId = selectedVoyage.value.replace('voyage-', '');
+  if (!voyageId || isNaN(Number(voyageId))) {
+    console.error("Invalid voyage ID format:", selectedVoyage.value);
+    chatMessages.value.push({
+      id: Date.now(),
+      role: 'assistant',
+      content: "❌ Invalid voyage selection. Please try again.",
+      timestamp: new Date().toISOString()
+    });
+    nextTick(scrollToBottom);
+    return;
+  }
+
+  const userMessage = {
+    id: Date.now(),
+    role: 'user',
+    content: chatInput.value.trim(),
+    timestamp: new Date().toISOString()
+  };
+
+  chatMessages.value.push(userMessage);
+  chatInput.value = '';
+  isLoadingChat.value = true;
+
+  try {
+    // Pre-load voyage details if missing
+    if (!voyageDetails.value || voyageDetails.value.voyage?.id !== Number(voyageId)) {
+      const res = await fetch(`/api/v1/voyages/${voyageId}/details`);
+      if (!res.ok) throw new Error(`Failed to load voyage: ${res.status}`);
+      const data = await res.json();
+      if (data.error) throw new Error(data.error);
+      voyageDetails.value = data;
+    }
+
+    const res = await fetch(`/api/v1/voyages/${voyageId}/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+      },
+      body: JSON.stringify({
+        message: userMessage.content,
+        currentEventIndex: Number(currentEventIndex.value) || 0
+      })
+    });
+
+    if (!res.ok) {
+      const errorData = await res.json().catch(() => ({}));
+      throw new Error(errorData.error || `HTTP ${res.status}`);
+    }
+
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+
+    chatMessages.value.push({
+      id: Date.now() + 1,
+      role: 'assistant',
+      content: data.response,
+      timestamp: data.timestamp || new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("Chat error:", error);
+    chatMessages.value.push({
+      id: Date.now() + 1,
+      role: 'assistant',
+      content: `⚠️ ${error.message || "Captain is unavailable."}`,
+      timestamp: new Date().toISOString()
+    });
+  } finally {
+    isLoadingChat.value = false;
+    nextTick(scrollToBottom);
+  }
+}
+
+// ✅ ADD scroll helper
+function scrollToBottom() {
+  const container = document.querySelector('.chat-messages');
+  if (container?.lastElementChild) {
+    container.scrollTop = container.scrollHeight;
+  }
+}
+
+// ✅ REPLACE the querySelector watch with direct DOM scroll
+watch(chatMessages, () => {
+  nextTick(scrollToBottom);
+}, { deep: true });
+
+// ✅ REPLACE with this consolidated watcher
+watch(isPlaying, (playing) => {
+  if (playing) {
+    // Clear chat when playback starts
+    showChat.value = false;
+    chatMessages.value = [];
+    chatInput.value = '';
+    isLoadingChat.value = false;
+    animate();
+  } else {
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+  }
+});
+
+// ✅ ADD watcher for voyage changes
+watch(selectedVoyage, (newVoyage, oldVoyage) => {
+  if (newVoyage !== oldVoyage) {
+    showChat.value = false;
+    chatMessages.value = [];
+    chatInput.value = '';
+    isLoadingChat.value = false;
+  }
+});
+
+// ✅ ENHANCE exitSelection
+function exitSelection() {
+  selectedVoyage.value = null;
+  voyageDetails.value = null;
+  isPlaying.value = false;
+  currentEventIndex.value = 0;
+  selectedEvent.value = null;
+  showVoyageList.value = true;
+  // Clear chat completely
+  showChat.value = false;
+  chatMessages.value = [];
+  chatInput.value = '';
+  isLoadingChat.value = false;
+
+  if (myGlobe.value) {
+    myGlobe.value.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1000);
+    myGlobe.value.htmlElementsData([]);
+  }
+}
+
 
 // ────────────────────────────────────────────────────────────────
 // FIX 1: Random bright colors for each voyage (ENHANCED with caching)
@@ -84,20 +256,6 @@ async function selectVoyage(voyageId) {
   } catch (error) {
     console.error("Error selecting voyage:", error);
     exitSelection();
-  }
-}
-
-function exitSelection() {
-  selectedVoyage.value = null;
-  voyageDetails.value = null;
-  isPlaying.value = false;
-  currentEventIndex.value = 0;
-  selectedEvent.value = null;
-  showVoyageList.value = true;
-
-  if (myGlobe.value) {
-    myGlobe.value.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1000);
-    myGlobe.value.htmlElementsData([]);
   }
 }
 
@@ -207,10 +365,7 @@ function animate() {
   animationFrame = requestAnimationFrame(animate);
 }
 
-watch(isPlaying, (playing) => {
-  if (playing) animate();
-  else if (animationFrame) cancelAnimationFrame(animationFrame);
-});
+// ❌ REMOVED DUPLICATE watcher(isPlaying, ...)
 
 watch([interpolatedPosition, isPlaying], ([pos, playing]) => {
   if (pos && playing && myGlobe.value) {
@@ -317,8 +472,17 @@ const currentWeatherEvent = computed(() => {
 // ────────────────────────────────────────────────────────────────
 // FIX 4: Initialize globe with random colors and store paths (ENHANCED)
 // ────────────────────────────────────────────────────────────────
+
+// ✅ In onMounted cleanup
+onUnmounted(() => {
+  if (animationFrame) cancelAnimationFrame(animationFrame);
+  showChat.value = false;
+  chatMessages.value = [];
+});
+
 onMounted(async () => {
-  try {
+  try { // ✅ Add loading state logic
+    isLoadingVoyages.value = true;
     if (!globeDiv.value) {
       throw new Error("Globe container not found");
     }
@@ -399,6 +563,8 @@ onMounted(async () => {
     }
   } catch (error) {
     console.error("Error initializing globe:", error);
+  } finally { // ✅ Add loading state logic
+    isLoadingVoyages.value = false;
   }
 });
 
@@ -481,6 +647,8 @@ watch([myGlobe, allPaths], ([globe, paths]) => {
     }
   }
 });
+
+// ❌ REMOVED DUPLICATE watcher(chatMessages, ...)
 </script>
 
 <template>
@@ -497,6 +665,43 @@ watch([myGlobe, allPaths], ([globe, paths]) => {
       <div class="weather-date">{{ new Date(currentWeatherEvent.date).toLocaleDateString() }}</div>
     </div>
   </div>
+
+  <button
+    v-if="selectedVoyage && !isPlaying"
+    @click="showChat = !showChat"
+    class="chat-toggle-btn"
+  >
+    💬 Chat with Captain
+  </button>
+
+  <!-- Chat Panel (NEW) -->
+  <div v-if="showChat && selectedVoyage && !isPlaying" class="chat-panel">
+    <div class="chat-header">
+      <h4>Captain {{ voyageDetails?.voyage?.captainName || 'of the Ship' }}</h4>
+      <button @click="showChat = false" class="close-chat">✕</button>
+    </div>
+    <div class="chat-messages" ref="chatMessagesContainer">
+      <div v-for="msg in chatMessages" :key="msg.id" :class="['chat-message', msg.role]">
+        <div class="message-content">{{ msg.content }}</div>
+        <div class="message-time">{{ new Date(msg.timestamp).toLocaleTimeString() }}</div>
+      </div>
+      <div v-if="isLoadingChat" class="chat-message assistant">
+        <div class="message-content loading">Captain is typing...</div>
+      </div>
+    </div>
+    <div class="chat-input">
+      <input
+        v-model="chatInput"
+        @keyup.enter="sendChatMessage"
+        placeholder="Ask the captain..."
+        :disabled="isLoadingChat"
+      />
+      <button @click="sendChatMessage" :disabled="isLoadingChat">
+        {{ isLoadingChat ? '...' : 'Send' }}
+      </button>
+    </div>
+  </div>
+
 
   <!-- Voyage List Sidebar -->
   <div class="voyage-list-panel" :class="{ 'mobile-hidden': !showVoyageList && selectedVoyage }">
@@ -1127,6 +1332,194 @@ body {
     flex-direction: column;
     text-align: center;
     gap: 12px;
+  }
+}
+
+/* Chat Toggle Button */
+.chat-toggle-btn {
+  position: absolute;
+  bottom: 100px;
+  right: 20px;
+  padding: 12px 20px;
+  background: rgba(94, 234, 212, 0.2);
+  border: 1px solid #5eead4;
+  border-radius: 8px;
+  color: #5eead4;
+  cursor: pointer;
+  z-index: 1000;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  font-weight: 500;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+}
+
+.chat-toggle-btn:hover {
+  background: rgba(94, 234, 212, 0.3);
+  transform: scale(1.05);
+}
+
+.chat-toggle-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Chat Panel */
+.chat-panel {
+  position: absolute;
+  bottom: 160px;
+  right: 20px;
+  width: 350px;
+  height: 400px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid #5eead4;
+  border-radius: 12px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  z-index: 50000;
+}
+
+.chat-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px;
+  border-bottom: 1px solid rgba(94, 234, 212, 0.2);
+  color: #5eead4;
+}
+
+.chat-header h4 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.close-chat {
+  background: none;
+  border: none;
+  color: #5eead4;
+  font-size: 18px;
+  cursor: pointer;
+  padding: 4px;
+}
+
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.chat-message {
+  display: flex;
+  flex-direction: column;
+  max-width: 85%;
+}
+
+.chat-message.user {
+  align-self: flex-end;
+  align-items: flex-end;
+}
+
+.chat-message.assistant {
+  align-self: flex-start;
+  align-items: flex-start;
+}
+
+.message-content {
+  background: rgba(30, 41, 59, 0.8);
+  padding: 10px 14px;
+  border-radius: 8px;
+  font-size: 0.9rem;
+  line-height: 1.4;
+  color: #e2e8f0;
+  word-wrap: break-word;
+}
+
+.chat-message.user .message-content {
+  background: rgba(94, 234, 212, 0.2);
+  border: 1px solid rgba(94, 234, 212, 0.3);
+}
+
+.message-content.loading {
+  font-style: italic;
+  color: #94a3b8;
+}
+
+.message-time {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.chat-input {
+  display: flex;
+  padding: 16px;
+  border-top: 1px solid rgba(94, 234, 212, 0.2);
+  gap: 8px;
+}
+
+.chat-input input {
+  flex: 1;
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid #5eead4;
+  border-radius: 6px;
+  padding: 10px 12px;
+  color: #e2e8f0;
+  font-size: 0.9rem;
+}
+
+.chat-input input:disabled {
+  opacity: 0.5;
+}
+
+.chat-input button {
+  background: rgba(94, 234, 212, 0.2);
+  border: 1px solid #5eead4;
+  border-radius: 6px;
+  color: #5eead4;
+  padding: 10px 16px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.chat-input button:hover:not(:disabled) {
+  background: rgba(94, 234, 212, 0.3);
+}
+
+.chat-input button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Responsive Chat */
+@media (max-width: 768px) {
+  .chat-toggle-btn {
+    bottom: auto;
+    top: 75px;
+    right: 10px;
+    padding: 10px 16px;
+    font-size: 0.9rem;
+  }
+
+  .chat-panel {
+    width: calc(100vw - 20px);
+    max-width: 400px;
+    right: 10px;
+    bottom: 100px;
+    height: 50vh;
+  }
+}
+
+@media (max-width: 480px) {
+  .chat-panel {
+    width: calc(100vw - 10px);
+    right: 5px;
+    left: 5px;
   }
 }
 </style>
