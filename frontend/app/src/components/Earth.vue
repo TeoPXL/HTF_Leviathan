@@ -14,28 +14,50 @@ const isPlaying = ref(false);
 const currentEventIndex = ref(0);
 const showVoyageList = ref(true);
 const selectedEvent = ref(null);
-const allPaths = ref([]); // Store processed paths for filtering
+const allPaths = ref([]);
+const isDayMode = ref(false); // NEW: Day/Night mode state
 let animationFrame = null;
 
-// ─────────────────────────────────════════════════───────────────
+// NEW: Centralized path animation speed (slower = higher number)
+const PATH_ANIMATION_TIME = 20000; // 20 seconds per cycle (was 12000)
+
+// ────────────────────────────────────────────────────────────────
 // FIX 1: Random bright colors for each voyage (ENHANCED with caching)
-// ─────────────────────────────────════════════════───────────────
-const voyageColorCache = new Map(); // Cache colors per voyage ID
+// ────────────────────────────────────────────────────────────────
+const voyageColorCache = new Map();
 
 function ensureVisibleColor(voyageId) {
-  // Return cached color if available
   if (voyageColorCache.has(voyageId)) {
     return voyageColorCache.get(voyageId);
   }
-
-  // Generate random hue (0-360) for bright, distinct colors
   const hue = Math.floor(Math.random() * 360);
-  const color = `hsl(${hue}, 85%, 60%)`; // High saturation, good visibility on dark globe
-
-  // Cache the color
+  const color = `hsl(${hue}, 85%, 60%)`;
   voyageColorCache.set(voyageId, color);
   return color;
 }
+
+// ────────────────────────────────────────────────────────────────
+// NEW: Day/Night Mode Toggle
+// ────────────────────────────────────────────────────────────────
+function toggleDayNight() {
+  isDayMode.value = !isDayMode.value;
+}
+
+// Watch for mode changes and update globe textures
+watch(isDayMode, (isDay) => {
+  if (!myGlobe.value) return;
+
+  myGlobe.value
+    .globeImageUrl(
+      isDay
+        ? "//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+        : "//unpkg.com/three-globe/example/img/earth-night.jpg"
+    )
+    .bumpImageUrl("//unpkg.com/three-globe/example/img/earth-topology.png")
+    .showAtmosphere(true)
+    .atmosphereColor(isDay ? '#87CEEB' : '#3a228a')
+    .atmosphereAltitude(isDay ? 0.15 : 0.2);
+});
 
 // ────────────────────────────────────────────────────────────────
 // Voyage Selection (ENHANCED with better error handling)
@@ -54,7 +76,6 @@ async function selectVoyage(voyageId) {
 
     voyageDetails.value = await res.json();
 
-    // FIX: Ensure globe and path exist before camera movement
     await nextTick();
     const startCoords = selectedPath.value?.geometry?.coordinates?.[0]?.[0];
     if (myGlobe.value && startCoords && Array.isArray(startCoords) && startCoords.length >= 2) {
@@ -62,7 +83,6 @@ async function selectVoyage(voyageId) {
     }
   } catch (error) {
     console.error("Error selecting voyage:", error);
-    // Reset on error
     exitSelection();
   }
 }
@@ -75,10 +95,8 @@ function exitSelection() {
   selectedEvent.value = null;
   showVoyageList.value = true;
 
-  // FIX: Explicitly clear markers and reset view
   if (myGlobe.value) {
     myGlobe.value.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1000);
-    // Clear all HTML elements (markers) immediately
     myGlobe.value.htmlElementsData([]);
   }
 }
@@ -170,7 +188,7 @@ const currentDateDisplay = computed(() => {
 });
 
 // ────────────────────────────────────────────────────────────────
-// Animation & Controls (MODIFIED: 4x slower animation)
+// Animation & Controls
 // ────────────────────────────────────────────────────────────────
 function togglePlay() {
   isPlaying.value = !isPlaying.value;
@@ -180,7 +198,6 @@ function animate() {
   if (!isPlaying.value || !voyageDetails.value?.events?.length) return;
 
   const totalSteps = voyageDetails.value.events.length - 1;
-  // CHANGED: 4x slower animation (0.01 / 4 = 0.0025)
   currentEventIndex.value = Number(currentEventIndex.value) + 0.0025;
 
   if (currentEventIndex.value >= totalSteps) {
@@ -195,7 +212,6 @@ watch(isPlaying, (playing) => {
   else if (animationFrame) cancelAnimationFrame(animationFrame);
 });
 
-// MODIFIED: 3x more zoomed in when playing (0.5 / 3 ≈ 0.1667)
 watch([interpolatedPosition, isPlaying], ([pos, playing]) => {
   if (pos && playing && myGlobe.value) {
     myGlobe.value.pointOfView({ lat: pos[1], lng: pos[0], altitude: 0.1667 }, 100);
@@ -241,7 +257,6 @@ watch(selectedVoyage, (newVoyageId) => {
   }
 
   try {
-    // Show only selected path when a voyage is active, otherwise show all
     const pathsToShow = newVoyageId
       ? allPaths.value.filter(p => p?.properties?.id === newVoyageId)
       : allPaths.value;
@@ -256,7 +271,7 @@ watch(selectedVoyage, (newVoyageId) => {
       .pathStroke(1.5)
       .pathDashLength(0.05)
       .pathDashGap(0.02)
-      .pathDashAnimateTime(12000);
+      .pathDashAnimateTime(PATH_ANIMATION_TIME); // UPDATED: Use constant
   } catch (error) {
     console.error("Error updating path display:", error);
   }
@@ -285,7 +300,7 @@ function getWeatherEmoji(weather) {
     if (weatherLower.includes(key)) return emoji;
   }
 
-  return '🌡️'; // default emoji
+  return '🌡️';
 }
 
 const currentWeatherEvent = computed(() => {
@@ -309,29 +324,30 @@ onMounted(async () => {
     }
 
     myGlobe.value = Globe()(globeDiv.value)
-      .globeImageUrl("//unpkg.com/three-globe/example/img/earth-night.jpg")
+      .globeImageUrl(
+        isDayMode.value
+          ? "//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+          : "//unpkg.com/three-globe/example/img/earth-night.jpg"
+      )
       .bumpImageUrl("//unpkg.com/three-globe/example/img/earth-topology.png")
       .backgroundImageUrl("//unpkg.com/three-globe/example/img/night-sky.png")
       .showAtmosphere(true)
-      .atmosphereColor('#3a228a')
-      .atmosphereAltitude(0.2);
+      .atmosphereColor(isDayMode.value ? '#87CEEB' : '#3a228a')
+      .atmosphereAltitude(isDayMode.value ? 0.15 : 0.2);
 
     const res = await fetch("/api/v1/voyages-geo");
     if (!res.ok) throw new Error(`Failed to fetch geo data: ${res.status}`);
 
     const data = await res.json();
 
-    // FIX: Validate data structure before assignment
     if (!data || !Array.isArray(data.features)) {
       throw new Error("Invalid geo data structure");
     }
 
     geoData.value = data;
 
-    // Process and store all paths with random colors
     allPaths.value = geoData.value.features
       .filter(feature => {
-        // FIX: Validate feature structure
         const isValid = feature?.geometry?.coordinates?.[0]?.length >= 2 &&
           feature?.properties?.id &&
           Array.isArray(feature.geometry.coordinates[0]);
@@ -352,7 +368,6 @@ onMounted(async () => {
             !isNaN(coord[1])
         );
 
-        // Assign random bright color
         feature.properties.color = ensureVisibleColor(feature.properties.id);
 
         return {
@@ -360,12 +375,10 @@ onMounted(async () => {
           properties: feature.properties,
         };
       })
-      .filter(Boolean); // Remove null entries
+      .filter(Boolean);
 
-    // Wait for DOM update before rendering paths
     await nextTick();
 
-    // FIX: Double-check globe is still available
     if (myGlobe.value) {
       myGlobe.value
         .pathsData(allPaths.value)
@@ -377,7 +390,7 @@ onMounted(async () => {
         .pathStroke(1.5)
         .pathDashLength(0.05)
         .pathDashGap(0.02)
-        .pathDashAnimateTime(12000)
+        .pathDashAnimateTime(PATH_ANIMATION_TIME) // UPDATED: Use constant
         .onPathClick(path => {
           if (path?.properties?.id) {
             selectVoyage(path.properties.id.replace('voyage-', ''));
@@ -393,9 +406,8 @@ onMounted(async () => {
 // Markers & Boat Updates (FIXED: Now clears markers on exit)
 // ────────────────────────────────────────────────────────────────
 watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) => {
-  if (!globe) return; // Globe must exist
+  if (!globe) return;
 
-  // FIX: Explicitly clear markers when no details (on exit)
   if (!details || !details.events?.length) {
     globe.htmlElementsData([]);
     return;
@@ -453,7 +465,6 @@ watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) =>
 // ────────────────────────────────────────────────────────────────
 watch([myGlobe, allPaths], ([globe, paths]) => {
   if (globe && paths?.length && !selectedVoyage.value) {
-    // Re-render all paths when globe becomes ready
     try {
       globe.pathsData(paths)
         .pathPoints("coords")
@@ -464,7 +475,7 @@ watch([myGlobe, allPaths], ([globe, paths]) => {
         .pathStroke(1.5)
         .pathDashLength(0.05)
         .pathDashGap(0.02)
-        .pathDashAnimateTime(12000);
+        .pathDashAnimateTime(PATH_ANIMATION_TIME); // UPDATED: Use constant
     } catch (error) {
       console.error("Error in globe readiness watcher:", error);
     }
@@ -491,13 +502,23 @@ watch([myGlobe, allPaths], ([globe, paths]) => {
   <div class="voyage-list-panel" :class="{ 'mobile-hidden': !showVoyageList && selectedVoyage }">
     <div class="panel-header">
       <h2>Voyages</h2>
-      <button
-        v-if="selectedVoyage"
-        @click="showVoyageList = !showVoyageList"
-        class="toggle-btn"
-      >
-        {{ showVoyageList ? '−' : '+' }}
-      </button>
+      <div class="header-controls">
+        <!-- NEW: Day/Night Toggle Button -->
+        <button
+          @click="toggleDayNight"
+          class="day-night-toggle"
+          :title="isDayMode ? 'Switch to Night Mode' : 'Switch to Day Mode'"
+        >
+          {{ isDayMode ? '🌙' : '☀️' }}
+        </button>
+        <button
+          v-if="selectedVoyage"
+          @click="showVoyageList = !showVoyageList"
+          class="toggle-btn"
+        >
+          {{ showVoyageList ? '−' : '+' }}
+        </button>
+      </div>
     </div>
     <div class="voyage-list">
       <div
@@ -564,7 +585,7 @@ watch([myGlobe, allPaths], ([globe, paths]) => {
 </template>
 
 <style>
-/* All styles remain the same as in original code */
+/* All styles remain the same as in original code, with NEW additions below */
 * {
   box-sizing: border-box;
   margin: 0;
@@ -611,6 +632,33 @@ body {
   color: #5eead4;
   font-size: 1.25rem;
   margin: 0;
+}
+
+/* NEW: Container for header control buttons */
+.header-controls {
+  display: flex;
+  gap: 8px;
+}
+
+/* NEW: Day/Night Toggle Button Styles */
+.day-night-toggle {
+  background: rgba(94, 234, 212, 0.2);
+  border: 1px solid #5eead4;
+  border-radius: 6px;
+  color: #5eead4;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+
+.day-night-toggle:hover {
+  background: rgba(94, 234, 212, 0.3);
+  transform: scale(1.1);
 }
 
 .toggle-btn {
@@ -689,13 +737,13 @@ body {
   top: 20px;
   right: 20px;
   padding: 12px 24px;
-  background: rgba(220, 38, 38, 0.95); /* Red for visibility */
+  background: rgba(220, 38, 38, 0.95);
   color: #ffffff;
   border: 2px solid rgba(255, 255, 255, 0.3);
   border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
-  z-index: 2000; /* Highest z-index */
+  z-index: 2000;
   transition: all 0.3s ease;
   backdrop-filter: blur(10px);
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
@@ -913,6 +961,11 @@ body {
     display: block;
   }
 
+  /* NEW: Show day/night toggle on mobile too */
+  .day-night-toggle {
+    display: flex;
+  }
+
   .info-panel {
     top: auto;
     bottom: 100px;
@@ -1047,7 +1100,7 @@ body {
 /* Responsive adjustments for weather display */
 @media (max-width: 768px) {
   .weather-display {
-    top: 60px; /* Below exit button */
+    top: 60px;
     left: 10px;
     right: 10px;
     transform: none;
