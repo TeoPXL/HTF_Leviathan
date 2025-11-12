@@ -29,4 +29,5 @@ if (import.meta.main) {
     executeSqlFile("./src/assets/test.sql").catch((e) => process.exit(1));
     executeSqlFile("./src/assets/test2.sql").catch((e) => process.exit(1));
     executeSqlFile("./src/assets/test3.sql").catch((e) => process.exit(1));
+    executeSqlFile("./src/assets/big.sql").catch((e) => process.exit(1));
 }

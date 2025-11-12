@@ -68,6 +68,36 @@ export const voyagesRoutes = (app: Elysia, db: ReturnType<typeof drizzle>) => {
     }, {
         query: t.Object({}) // optional query parameters later
     })
+    // src/routes/voyagesRoutes.ts (add this inside your route definition)
+    .get("/v1/voyages/:id/details", async ({ params: { id } }) => {
+        try {
+            const voyageData = await db
+                .select({
+                    voyage: voyages,
+                    ship: ships,
+                })
+                .from(voyages)
+                .leftJoin(ships, eq(voyages.shipId, ships.id))
+                .where(eq(voyages.id, Number(id)))
+                .limit(1);
+
+            if (!voyageData.length) return { error: "Voyage not found" };
+
+            const voyageEvents = await db
+                .select()
+                .from(events)
+                .where(eq(events.voyageId, Number(id)))
+                .orderBy(asc(events.date));
+
+            return {
+                ...voyageData[0],
+                events: voyageEvents,
+            };
+        } catch (error) {
+            console.error("Error fetching voyage details:", error);
+            return { error: "Failed to fetch voyage details" };
+        }
+    });
 
     return app
 }
