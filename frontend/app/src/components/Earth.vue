@@ -757,7 +757,7 @@ body {
 /* Info Panel */
 .info-panel {
   position: absolute;
-  top: 20px;
+  top: 75px;
   right: 20px;
   padding: 24px;
   background: rgba(15, 23, 42, 0.9);
