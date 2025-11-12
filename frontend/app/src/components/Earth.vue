@@ -131,7 +131,7 @@ const currentDateDisplay = computed(() => {
 });
 
 // ────────────────────────────────────────────────────────────────
-// Animation & Controls (keep existing)
+// Animation & Controls (MODIFIED: 4x slower animation)
 // ────────────────────────────────────────────────────────────────
 function togglePlay() {
   isPlaying.value = !isPlaying.value;
@@ -140,7 +140,8 @@ function togglePlay() {
 function animate() {
   if (!isPlaying.value || !voyageDetails.value) return;
   const totalSteps = voyageDetails.value.events.length - 1;
-  currentEventIndex.value = Number(currentEventIndex.value) + 0.01;
+  // CHANGED: 4x slower animation (0.01 / 4 = 0.0025)
+  currentEventIndex.value = Number(currentEventIndex.value) + 0.0025;
 
   if (currentEventIndex.value >= totalSteps) {
     currentEventIndex.value = totalSteps;
@@ -154,9 +155,10 @@ watch(isPlaying, (playing) => {
   else cancelAnimationFrame(animationFrame);
 });
 
+// MODIFIED: 3x more zoomed in when playing (0.5 / 3 ≈ 0.1667)
 watch([interpolatedPosition, isPlaying], ([pos, playing]) => {
   if (pos && playing && myGlobe.value) {
-    myGlobe.value.pointOfView({ lat: pos[1], lng: pos[0], altitude: 0.5 }, 100);
+    myGlobe.value.pointOfView({ lat: pos[1], lng: pos[0], altitude: 0.1667 }, 100);
   }
 });
 
@@ -206,6 +208,44 @@ watch(selectedVoyage, (newVoyageId) => {
     .pathDashLength(0.05)
     .pathDashGap(0.02)
     .pathDashAnimateTime(12000);
+});
+
+
+// ────────────────────────────────────────────────────────────────
+// Weather Display Logic
+// ────────────────────────────────────────────────────────────────
+function getWeatherEmoji(weather) {
+  if (!weather) return '🌡️';
+
+  const weatherLower = weather.toLowerCase();
+  const emojiMap = {
+    'clear': '☀️', 'sunny': '☀️',
+    'cloud': '☁️', 'cloudy': '☁️', 'overcast': '☁️',
+    'rain': '🌧️', 'rainy': '🌧️', 'shower': '🌦️',
+    'storm': '⛈️', 'thunder': '⛈️',
+    'snow': '❄️', 'snowy': '❄️',
+    'fog': '🌫️', 'foggy': '🌫️', 'mist': '🌫️',
+    'wind': '💨', 'windy': '💨', 'gale': '💨',
+    'hurricane': '🌀', 'typhoon': '🌀',
+    'calm': '🌊', 'smooth': '🌊', 'rough': '🌊', 'turbulent': '🌊',
+  };
+
+  for (const [key, emoji] of Object.entries(emojiMap)) {
+    if (weatherLower.includes(key)) return emoji;
+  }
+
+  return '🌡️'; // default emoji
+}
+
+const currentWeatherEvent = computed(() => {
+  if (!voyageDetails.value?.events?.length) return null;
+
+  const events = voyageDetails.value.events;
+  const index = Number(currentEventIndex.value);
+  const nearestIndex = Math.round(index);
+  const clampedIndex = Math.max(0, Math.min(nearestIndex, events.length - 1));
+
+  return events[clampedIndex];
 });
 
 // ────────────────────────────────────────────────────────────────
@@ -311,7 +351,17 @@ watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) =>
 
 <template>
   <div ref="globeDiv" class="globe-container"></div>
-
+  <!-- Weather Display -->
+  <div v-if="selectedVoyage && currentWeatherEvent" class="weather-display">
+    <div class="weather-emoji">{{ getWeatherEmoji(currentWeatherEvent.weather) }}</div>
+    <div class="weather-details">
+      <div class="weather-main">
+        <span class="weather-condition">{{ currentWeatherEvent.weather || 'Weather data not available' }}</span>
+        <span class="weather-activity">{{ currentWeatherEvent.activity || 'No activity recorded' }}</span>
+      </div>
+      <div class="weather-date">{{ new Date(currentWeatherEvent.date).toLocaleDateString() }}</div>
+    </div>
+  </div>
   <!-- Voyage List Sidebar -->
   <div class="voyage-list-panel" :class="{ 'mobile-hidden': !showVoyageList && selectedVoyage }">
     <div class="panel-header">
@@ -808,5 +858,93 @@ body {
 .voyage-list::-webkit-scrollbar-thumb {
   background: #5eead4;
   border-radius: 4px;
+}
+
+/* Weather Display */
+.weather-display {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  border-radius: 12px;
+  padding: 16px 24px;
+  color: #e2e8f0;
+  z-index: 1500;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  min-width: 300px;
+  max-width: 500px;
+}
+
+.weather-emoji {
+  font-size: 48px;
+  line-height: 1;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
+}
+
+.weather-details {
+  flex: 1;
+}
+
+.weather-main {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.weather-condition {
+  font-size: 1.2rem;
+  font-weight: 600;
+  color: #5eead4;
+}
+
+.weather-activity {
+  font-size: 1rem;
+  color: #cbd5e1;
+}
+
+.weather-date {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+/* Responsive adjustments for weather display */
+@media (max-width: 768px) {
+  .weather-display {
+    top: 60px; /* Below exit button */
+    left: 10px;
+    right: 10px;
+    transform: none;
+    padding: 12px 16px;
+    min-width: auto;
+    max-width: none;
+  }
+
+  .weather-emoji {
+    font-size: 36px;
+  }
+
+  .weather-condition {
+    font-size: 1rem;
+  }
+
+  .weather-activity {
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .weather-display {
+    flex-direction: column;
+    text-align: center;
+    gap: 12px;
+  }
 }
 </style>
