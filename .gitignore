@@ -1,0 +1,10 @@
+.DS_Store
+.idea/modules.xml
+.idea/
+frontend/app/node_modules/
+frontend/app/public/test-content/
+api/app/.env
+db.env
+grafana.env
+*.env
+api/app/node_modules/
