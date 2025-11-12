@@ -14,141 +14,16 @@ const isPlaying = ref(false);
 const currentEventIndex = ref(0);
 const showVoyageList = ref(true);
 const selectedEvent = ref(null);
+const allPaths = ref([]); // Store processed paths for filtering
 let animationFrame = null;
 
 // ────────────────────────────────────────────────────────────────
-// FIX 1: Handle antimeridian wrapping for proper shortest-path interpolation
-// ────────────────────────────────────────────────────────────────
-function correctLngWrap(lng1, lng2) {
-  const delta = lng2 - lng1;
-  if (delta > 180) return lng2 - 360;
-  if (delta < -180) return lng2 + 360;
-  return lng2;
-}
-
-// ────────────────────────────────────────────────────────────────
-// Core Logic
-// ────────────────────────────────────────────────────────────────
-watch(currentEventIndex, (newVal) => {
-  if (typeof newVal === "string") {
-    currentEventIndex.value = Number(newVal);
-  }
-});
-
-const selectedPath = computed(() => {
-  if (!selectedVoyage.value || !geoData.value) return null;
-  return geoData.value.features.find(f => f.properties.id === selectedVoyage.value);
-});
-
-const interpolatedPosition = computed(() => {
-  if (!selectedPath.value) return null;
-  const coords = selectedPath.value.geometry.coordinates[0];
-  if (!coords.length) return null;
-
-  const index = Number(currentEventIndex.value);
-  const maxIndex = coords.length - 1;
-  const clampedIndex = Math.max(0, Math.min(index, maxIndex));
-
-  const floor = Math.floor(clampedIndex);
-  const ceil = Math.min(Math.ceil(clampedIndex), maxIndex);
-
-  if (!coords[floor] || !coords[ceil]) return null;
-  if (floor === ceil) return coords[floor];
-
-  const [lng1, lat1] = coords[floor];
-  const [lng2, lat2] = coords[ceil];
-  const fraction = clampedIndex - floor;
-
-  // Use corrected longitude wrapping to prevent "long way around"
-  const correctedLng2 = correctLngWrap(lng1, lng2);
-  const interpolatedLng = lng1 + (correctedLng2 - lng1) * fraction;
-  const interpolatedLat = lat1 + (lat2 - lat1) * fraction;
-
-  return [interpolatedLng, interpolatedLat];
-});
-
-const currentDateDisplay = computed(() => {
-  if (!voyageDetails.value?.events?.length) return "";
-  const events = voyageDetails.value.events;
-  const index = Number(currentEventIndex.value);
-  const maxIndex = events.length - 1;
-  const clampedIndex = Math.max(0, Math.min(index, maxIndex));
-
-  const floor = Math.floor(clampedIndex);
-  const ceil = Math.min(Math.ceil(clampedIndex), maxIndex);
-
-  if (!events[floor] || !events[ceil]) return "";
-  if (floor === ceil) return new Date(events[floor].date).toLocaleDateString();
-
-  const date1 = new Date(events[floor].date).getTime();
-  const date2 = new Date(events[ceil].date).getTime();
-  const fraction = clampedIndex - floor;
-  const interpolated = date1 + (date2 - date1) * fraction;
-
-  return new Date(interpolated).toLocaleDateString();
-});
-
-// ────────────────────────────────────────────────────────────────
-// FIX 2: Generate consistently visible colors
+// FIX 1: Random bright colors for each voyage
 // ────────────────────────────────────────────────────────────────
 function ensureVisibleColor(voyageId) {
-  let hash = 0;
-  for (let i = 0; i < voyageId.length; i++) {
-    hash = ((hash << 5) - hash) + voyageId.charCodeAt(i);
-    hash = hash & hash;
-  }
-  const hue = Math.abs(hash) % 360;
-  return `hsl(${hue}, 85%, 60%)`; // High saturation, medium-high lightness
-}
-
-// ────────────────────────────────────────────────────────────────
-// Voyage List Sidebar
-// ────────────────────────────────────────────────────────────────
-const voyageList = computed(() => {
-  if (!geoData.value) return [];
-  return geoData.value.features.map(feature => ({
-    id: feature.properties.id,
-    name: feature.properties.name,
-    shipName: feature.properties.shipName,
-    color: feature.properties.color
-  }));
-});
-
-// ────────────────────────────────────────────────────────────────
-// Animation & Controls
-// ────────────────────────────────────────────────────────────────
-function animate() {
-  if (!isPlaying.value || !voyageDetails.value) return;
-  const totalSteps = voyageDetails.value.events.length - 1;
-  currentEventIndex.value = Number(currentEventIndex.value) + 0.01;
-
-  if (currentEventIndex.value >= totalSteps) {
-    currentEventIndex.value = totalSteps;
-    isPlaying.value = false;
-  }
-  animationFrame = requestAnimationFrame(animate);
-}
-
-watch(isPlaying, (playing) => {
-  if (playing) animate();
-  else cancelAnimationFrame(animationFrame);
-});
-
-watch([interpolatedPosition, isPlaying], ([pos, playing]) => {
-  if (pos && playing && myGlobe.value) {
-    myGlobe.value.pointOfView({ lat: pos[1], lng: pos[0], altitude: 0.5 }, 100);
-  }
-});
-
-// ────────────────────────────────────────────────────────────────
-// Event Actions
-// ────────────────────────────────────────────────────────────────
-function showEventDetails(event) {
-  selectedEvent.value = event;
-}
-
-function closeEventDetails() {
-  selectedEvent.value = null;
+  // Generate random hue (0-360) for bright, distinct colors
+  const hue = Math.floor(Math.random() * 360);
+  return `hsl(${hue}, 85%, 60%)`; // High saturation, good visibility on dark globe
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -184,12 +59,153 @@ function exitSelection() {
   }
 }
 
-function togglePlay() {
-  isPlaying.value = !isPlaying.value;
+// ────────────────────────────────────────────────────────────────
+// FIX 2: Handle antimeridian wrapping for proper shortest-path interpolation
+// ────────────────────────────────────────────────────────────────
+function correctLngWrap(lng1, lng2) {
+  const delta = lng2 - lng1;
+  if (delta > 180) return lng2 - 360;
+  if (delta < -180) return lng2 + 360;
+  return lng2;
 }
 
 // ────────────────────────────────────────────────────────────────
-// FIX 3: Ensure paths render correctly with validation
+// Core Logic (keep existing computed/watchers)
+// ────────────────────────────────────────────────────────────────
+watch(currentEventIndex, (newVal) => {
+  if (typeof newVal === "string") {
+    currentEventIndex.value = Number(newVal);
+  }
+});
+
+const selectedPath = computed(() => {
+  if (!selectedVoyage.value || !geoData.value) return null;
+  return geoData.value.features.find(f => f.properties.id === selectedVoyage.value);
+});
+
+const interpolatedPosition = computed(() => {
+  if (!selectedPath.value) return null;
+  const coords = selectedPath.value.geometry.coordinates[0];
+  if (!coords.length) return null;
+
+  const index = Number(currentEventIndex.value);
+  const maxIndex = coords.length - 1;
+  const clampedIndex = Math.max(0, Math.min(index, maxIndex));
+
+  const floor = Math.floor(clampedIndex);
+  const ceil = Math.min(Math.ceil(clampedIndex), maxIndex);
+
+  if (!coords[floor] || !coords[ceil]) return null;
+  if (floor === ceil) return coords[floor];
+
+  const [lng1, lat1] = coords[floor];
+  const [lng2, lat2] = coords[ceil];
+  const fraction = clampedIndex - floor;
+
+  const correctedLng2 = correctLngWrap(lng1, lng2);
+  const interpolatedLng = lng1 + (correctedLng2 - lng1) * fraction;
+  const interpolatedLat = lat1 + (lat2 - lat1) * fraction;
+
+  return [interpolatedLng, interpolatedLat];
+});
+
+const currentDateDisplay = computed(() => {
+  if (!voyageDetails.value?.events?.length) return "";
+  const events = voyageDetails.value.events;
+  const index = Number(currentEventIndex.value);
+  const maxIndex = events.length - 1;
+  const clampedIndex = Math.max(0, Math.min(index, maxIndex));
+
+  const floor = Math.floor(clampedIndex);
+  const ceil = Math.min(Math.ceil(clampedIndex), maxIndex);
+
+  if (!events[floor] || !events[ceil]) return "";
+  if (floor === ceil) return new Date(events[floor].date).toLocaleDateString();
+
+  const date1 = new Date(events[floor].date).getTime();
+  const date2 = new Date(events[ceil].date).getTime();
+  const fraction = clampedIndex - floor;
+  const interpolated = date1 + (date2 - date1) * fraction;
+
+  return new Date(interpolated).toLocaleDateString();
+});
+
+// ────────────────────────────────────────────────────────────────
+// Animation & Controls (keep existing)
+// ────────────────────────────────────────────────────────────────
+function animate() {
+  if (!isPlaying.value || !voyageDetails.value) return;
+  const totalSteps = voyageDetails.value.events.length - 1;
+  currentEventIndex.value = Number(currentEventIndex.value) + 0.01;
+
+  if (currentEventIndex.value >= totalSteps) {
+    currentEventIndex.value = totalSteps;
+    isPlaying.value = false;
+  }
+  animationFrame = requestAnimationFrame(animate);
+}
+
+watch(isPlaying, (playing) => {
+  if (playing) animate();
+  else cancelAnimationFrame(animationFrame);
+});
+
+watch([interpolatedPosition, isPlaying], ([pos, playing]) => {
+  if (pos && playing && myGlobe.value) {
+    myGlobe.value.pointOfView({ lat: pos[1], lng: pos[0], altitude: 0.5 }, 100);
+  }
+});
+
+// ────────────────────────────────────────────────────────────────
+// Event Actions (keep existing)
+// ────────────────────────────────────────────────────────────────
+function showEventDetails(event) {
+  selectedEvent.value = event;
+}
+
+function closeEventDetails() {
+  selectedEvent.value = null;
+}
+
+// ────────────────────────────────────────────────────────────────
+// Voyage List Sidebar (keep existing)
+// ────────────────────────────────────────────────────────────────
+const voyageList = computed(() => {
+  if (!geoData.value) return [];
+  return geoData.value.features.map(feature => ({
+    id: feature.properties.id,
+    name: feature.properties.name,
+    shipName: feature.properties.shipName,
+    color: feature.properties.color
+  }));
+});
+
+// ────────────────────────────────────────────────────────────────
+// FIX 3: Path filtering logic
+// ────────────────────────────────────────────────────────────────
+watch(selectedVoyage, (newVoyageId) => {
+  if (!myGlobe.value || !allPaths.value.length) return;
+
+  // Show only selected path when a voyage is active, otherwise show all
+  const pathsToShow = newVoyageId
+    ? allPaths.value.filter(p => p.properties.id === newVoyageId)
+    : allPaths.value;
+
+  myGlobe.value
+    .pathsData(pathsToShow)
+    .pathPoints("coords")
+    .pathPointLat(p => p[1])
+    .pathPointLng(p => p[0])
+    .pathColor(path => path.properties.color)
+    .pathLabel(path => path.properties.name)
+    .pathStroke(1.5)
+    .pathDashLength(0.05)
+    .pathDashGap(0.02)
+    .pathDashAnimateTime(12000);
+});
+
+// ────────────────────────────────────────────────────────────────
+// FIX 4: Initialize globe with random colors and store paths
 // ────────────────────────────────────────────────────────────────
 onMounted(async () => {
   myGlobe.value = Globe()(globeDiv.value)
@@ -203,18 +219,16 @@ onMounted(async () => {
   const res = await fetch("/api/v1/voyages-geo");
   geoData.value = await res.json();
 
-  // Validate and ensure visible colors
-  const paths = geoData.value.features
+  // Process and store all paths with random colors
+  allPaths.value = geoData.value.features
     .map(feature => {
-      // Ensure valid coordinate pairs
       const coords = feature.geometry.coordinates[0].filter(
         coord => coord && typeof coord[0] === 'number' && typeof coord[1] === 'number'
       );
 
-      // Skip invalid paths
       if (coords.length < 2) return null;
 
-      // Ensure visible color
+      // Assign random bright color
       feature.properties.color = ensureVisibleColor(feature.properties.id);
 
       return {
@@ -222,25 +236,25 @@ onMounted(async () => {
         properties: feature.properties,
       };
     })
-    .filter(Boolean); // Remove null entries
+    .filter(Boolean);
 
+  // Initial render with all paths
   myGlobe.value
-    .pathsData(paths)
+    .pathsData(allPaths.value)
     .pathPoints("coords")
     .pathPointLat(p => p[1])
     .pathPointLng(p => p[0])
     .pathColor(path => path.properties.color)
     .pathLabel(path => path.properties.name)
-    .pathStroke(2.5) // Thicker for visibility
+    .pathStroke(1.5)
     .pathDashLength(0.05)
     .pathDashGap(0.02)
     .pathDashAnimateTime(12000)
-    .pathOpacity(0.95) // Ensure opacity
     .onPathClick(path => selectVoyage(path.properties.id.replace('voyage-', '')));
 });
 
 // ────────────────────────────────────────────────────────────────
-// Markers & Boat Updates
+// Markers & Boat Updates (keep existing)
 // ────────────────────────────────────────────────────────────────
 watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) => {
   if (!details || !globe) return;
