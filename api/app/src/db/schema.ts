@@ -6,7 +6,7 @@ import {
     datetime,
     text,
     boolean,
-    unique,
+    unique, double,
 } from "drizzle-orm/mysql-core"
 
 /* ──────────────────────────────────────────────────────────────── */
@@ -47,6 +47,8 @@ export const events = mysqlTable("events", {
         .references(() => voyages.id, { onDelete: "cascade" }),
     date: datetime("date").notNull(),
     location: varchar("location", { length: 255 }).notNull(),
+    latitude: double('latitude').notNull(),
+    longitude: double('longitude').notNull(),
     activity: varchar("activity", { length: 255 }).notNull(),
     weather: varchar("weather", { length: 255 }).default(""),
     windDirection: varchar("wind_direction", { length: 255 }).default(""),
