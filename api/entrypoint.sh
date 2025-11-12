@@ -4,14 +4,14 @@ bun add drizzle-kit
 
 #REMOVE EXISTING
 echo "Dropping all tables before migration..."
-# bun run src/services/clear_database.ts
+bun run src/services/clear_database.ts
 
 # MIGRATE
 echo "Migrating..."
 bun drizzle-kit push --force
 
 echo "converting database data..."
-# bun run src/services/databaseConverter.ts
+bun run src/services/insert.ts
 
 
 # Start the application
