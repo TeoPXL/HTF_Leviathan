@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="">
+<head>
+    <meta charset="UTF-8">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <style>
+        /* latin */
+        @font-face {
+            font-family: 'Josefin Sans';
+            font-style: normal;
+            font-weight: 400;
+            font-display: swap;
+            src: url(https://fonts.gstatic.com/s/josefinsans/v32/Qw3aZQNVED7rKGKxtqIqX5EUDXx4.woff2) format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
+        /* latin */
+        @font-face {
+            font-family: 'Josefin Sans';
+            font-style: normal;
+            font-weight: 500;
+            font-display: swap;
+            src: url(https://fonts.gstatic.com/s/josefinsans/v32/Qw3aZQNVED7rKGKxtqIqX5EUDXx4.woff2) format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
+        /* latin */
+        @font-face {
+            font-family: 'Josefin Sans';
+            font-style: normal;
+            font-weight: 600;
+            font-display: swap;
+            src: url(https://fonts.gstatic.com/s/josefinsans/v32/Qw3aZQNVED7rKGKxtqIqX5EUDXx4.woff2) format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
+        /* latin-ext */
+        @font-face {
+            font-family: 'Poppins';
+            font-style: normal;
+            font-weight: 300;
+            font-display: swap;
+            src: url(https://fonts.gstatic.com/s/poppins/v20/pxiByp8kv8JHgFVrLDz8Z1JlFc-K.woff2) format('woff2');
+            unicode-range: U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+        }
+
+        /* latin */
+        @font-face {
+            font-family: 'Poppins';
+            font-style: normal;
+            font-weight: 300;
+            font-display: swap;
+            src: url(https://fonts.gstatic.com/s/poppins/v20/pxiByp8kv8JHgFVrLDz8Z1xlFQ.woff2) format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
+        /* latin-ext */
+        @font-face {
+            font-family: 'Poppins';
+            font-style: normal;
+            font-weight: 400;
+            font-display: swap;
+            src: url(https://fonts.gstatic.com/s/poppins/v20/pxiEyp8kv8JHgFVrJJnecmNE.woff2) format('woff2');
+            unicode-range: U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+        }
+
+        /* latin */
+        @font-face {
+            font-family: 'Poppins';
+            font-style: normal;
+            font-weight: 400;
+            font-display: swap;
+            src: url(https://fonts.gstatic.com/s/poppins/v20/pxiEyp8kv8JHgFVrJJfecg.woff2) format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
+        /* latin-ext */
+        @font-face {
+            font-family: 'Poppins';
+            font-style: normal;
+            font-weight: 500;
+            font-display: swap;
+            src: url(https://fonts.gstatic.com/s/poppins/v20/pxiByp8kv8JHgFVrLGT9Z1JlFc-K.woff2) format('woff2');
+            unicode-range: U+0100-02AF, U+0304, U+0308, U+0329, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20CF, U+2113, U+2C60-2C7F, U+A720-A7FF;
+        }
+
+        /* latin */
+        @font-face {
+            font-family: 'Poppins';
+            font-style: normal;
+            font-weight: 500;
+            font-display: swap;
+            src: url(https://fonts.gstatic.com/s/poppins/v20/pxiByp8kv8JHgFVrLGT9Z1xlFQ.woff2) format('woff2');
+            unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+2074, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+        }
+
+        :root {
+            --color-background-1: #121215;
+            --color-background-1-transparent: #1212155e;
+            --color-background-2: #36363C;
+            --color-background-2-solid: #2E2F39;
+            --color-background-2-transparent: #A3A5BD36;
+            --color-background-2-transparent-fade: #6D6F8238;
+            --color-background-3: #484957;
+            --color-background-3-transparent: #3B3C4494;
+            --color-background-4: #595960;
+            --color-background-5: #27272D;
+            --color-background-5-transparent: #27272DBF;
+            --color-background-6: #1e1e24;
+            --color-background-7-transparent: #1D1D249E;
+            --color-background-7-solid: #18181e;
+            --color-background-8-transparent: #ffffff3d;
+            --color-background-9-transparent: #1F1F24DB;
+            --color-accent-1: white;
+            --color-accent-1-fade: #d7d6d6;
+            --color-border-1: rgba(208, 209, 255, 0.14);
+            --color-border-2: rgba(220, 221, 255, 0.43);
+            --color-border-3: #e1e4fd1a;
+            --color-border-4: #e1e4fd08;
+            --color-border-5: #757882;
+            --color-text: white;
+            --color-text-alt: black;
+            --color-text-fade: #676a75;
+            --color-text-fade-less: #878a95;
+            --font-main: 'Poppins', sans-serif;
+            --font-logo: 'Josefin Sans', sans-serif;
+        }
+        .light-mode {
+            /* backgrounds — inverted to light neutrals; kept alpha bytes identical where present */
+            --color-background-1: #F6F7F9;
+            --color-background-1-transparent: #F6F7F95e;      /* kept '5e' alpha */
+            --color-background-2: #E8E9EE;
+            --color-background-2-solid: #ECECF2;
+            --color-background-2-transparent: #D3D5E036;      /* kept '36' alpha */
+            --color-background-2-transparent-fade: #C0C2CC38; /* kept '38' alpha */
+            --color-background-3: #D7D9E3;
+            --color-background-3-transparent: #E0E1E994;      /* kept '94' alpha */
+            --color-background-4: #C9CBD3;
+            --color-background-5: #FBFBFD;
+            --color-background-5-transparent: #FBFBFDBF;      /* kept 'BF' alpha */
+            --color-background-6: #F3F3F6;
+            --color-background-7-transparent: #F4F5F79E;      /* kept '9E' alpha */
+            --color-background-7-solid: #F8F9FB;
+            /* keep the same kind of semi-transparent overlay but switch to dark for light mode (useful as subtle overlay) */
+            --color-background-8-transparent: #0000003d;      /* kept '3d' alpha from original but inverted to black */
+
+            /* accents and text — invert to dark on light */
+            --color-accent-1: #0B1220;         /* strong dark accent for contrast on light surfaces */
+            --color-accent-1-fade: #4B4F57;
+
+            /* borders — chose darker subtle tones but kept transparency levels where they were rgba/alphas */
+            --color-border-1: rgba(16, 17, 23, 0.14);  /* kept alpha 0.14 */
+            --color-border-2: rgba(34, 35, 46, 0.43);  /* kept alpha 0.43 */
+            --color-border-3: #2D31381a;               /* kept '1a' alpha byte */
+            --color-border-4: #2D313808;               /* kept '08' alpha byte */
+            --color-border-5: #B6B9BF;
+
+            /* text */
+            --color-text: #0B1220;            /* primary text — dark */
+            --color-text-alt: #FFFFFF;        /* alt text (for dark elements/overlays) */
+            --color-text-fade: #9AA0A8;
+            --color-text-fade-less: #B3B6BD;
+
+            /* fonts (unchanged) */
+            --font-main: 'Poppins', sans-serif;
+            --font-logo: 'Josefin Sans', sans-serif;
+        }
+    </style>
+</head>
+<body>
+<div id="app"></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,141 @@
+version: '3.8'
+
+services:
+  traefik-htf:
+    image: traefik:latest
+    container_name: traefik-htf
+    command:
+      - --configFile=/etc/traefik/traefik.yml
+      - --experimental.plugins.dynamic-jwt-validation.modulename=github.com/antoniomika/dynamic-jwt-validation
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml
+    networks:
+      - default
+    environment:
+      TZ: GMT
+    restart: unless-stopped
+    depends_on:
+      - db-htf
+      - vue-htf
+      - api-htf
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:80/ping" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    env_file:
+      - jwt.env
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: "256MB"
+
+  db-htf:
+    container_name: db-htf
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    volumes:
+      - htf_db_data:/var/lib/mysql
+    env_file:
+      - db.env
+      - jwt.env
+    networks:
+      - default
+    environment:
+      TZ: GMT
+    healthcheck:
+      test: ["CMD", "bash", "-c", "mariadb-admin ping -h 127.0.0.1 -u $$MARIADB_USER -p$$MARIADB_PASSWORD"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "1024MB"
+
+  api-htf:
+    container_name: api-htf
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    depends_on:
+      db-htf:
+        condition: service_healthy
+    env_file:
+      - db.env
+      - jwt.env
+    networks:
+      - default
+    environment:
+      TZ: GMT
+    healthcheck:
+      test: [ "CMD", "bun", "run", "health-check.js" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: "2048MB"
+
+  vue-htf:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: vue-htf
+    networks:
+      - default
+    environment:
+      TZ: GMT
+    healthcheck:
+      test: ["CMD", "bun", "run", "health-check.js"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.25"
+          memory: "256MB"
+
+  phpmyadmin-htf:
+    image: phpmyadmin/phpmyadmin:latest
+    #profiles: ["admin"] (Run this locally only)
+    container_name: phpmyadmin-htf
+    environment:
+      PMA_HOST: db-htf
+    ports:
+      - "8888:80"
+    env_file:
+      - db.env
+      - jwt.env
+    depends_on:
+      db-htf:
+        condition: service_healthy
+    networks:
+      - default
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: "512MB"
+
+networks:
+  default:
+    driver: bridge
+
+volumes:
+  htf_db_data:
