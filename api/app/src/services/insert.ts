@@ -27,4 +27,5 @@ export async function executeSqlFile(filePath: string) {
 // Run directly
 if (import.meta.main) {
     executeSqlFile("./src/assets/test.sql").catch((e) => process.exit(1));
+    executeSqlFile("./src/assets/big.sql").catch((e) => process.exit(1));
 }
