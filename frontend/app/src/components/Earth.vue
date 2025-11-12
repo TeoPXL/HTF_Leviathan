@@ -133,6 +133,10 @@ const currentDateDisplay = computed(() => {
 // ────────────────────────────────────────────────────────────────
 // Animation & Controls (keep existing)
 // ────────────────────────────────────────────────────────────────
+function togglePlay() {
+  isPlaying.value = !isPlaying.value;
+}
+
 function animate() {
   if (!isPlaying.value || !voyageDetails.value) return;
   const totalSteps = voyageDetails.value.events.length - 1;
@@ -300,8 +304,8 @@ watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) =>
         return el;
       }
     })
-    .lat(d => d.lat)
-    .lng(d => d.lng);
+    .htmlLat(d => d.lat)   // Use .htmlLat()
+    .htmlLng(d => d.lng);  // Use .htmlLng()
 });
 </script>
 
