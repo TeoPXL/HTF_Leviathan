@@ -12,10 +12,22 @@ const selectedVoyage = ref(null);
 const voyageDetails = ref(null);
 const isPlaying = ref(false);
 const currentEventIndex = ref(0);
+const showVoyageList = ref(true);
+const selectedEvent = ref(null);
 let animationFrame = null;
 
 // ────────────────────────────────────────────────────────────────
-// FIX 1: Ensure currentEventIndex is always a number
+// FIX 1: Handle antimeridian wrapping for proper shortest-path interpolation
+// ────────────────────────────────────────────────────────────────
+function correctLngWrap(lng1, lng2) {
+  const delta = lng2 - lng1;
+  if (delta > 180) return lng2 - 360;
+  if (delta < -180) return lng2 + 360;
+  return lng2;
+}
+
+// ────────────────────────────────────────────────────────────────
+// Core Logic
 // ────────────────────────────────────────────────────────────────
 watch(currentEventIndex, (newVal) => {
   if (typeof newVal === "string") {
@@ -23,9 +35,6 @@ watch(currentEventIndex, (newVal) => {
   }
 });
 
-// ────────────────────────────────────────────────────────────────
-// Computed Properties
-// ────────────────────────────────────────────────────────────────
 const selectedPath = computed(() => {
   if (!selectedVoyage.value || !geoData.value) return null;
   return geoData.value.features.find(f => f.properties.id === selectedVoyage.value);
@@ -33,11 +42,9 @@ const selectedPath = computed(() => {
 
 const interpolatedPosition = computed(() => {
   if (!selectedPath.value) return null;
-
   const coords = selectedPath.value.geometry.coordinates[0];
   if (!coords.length) return null;
 
-  // Force number and clamp
   const index = Number(currentEventIndex.value);
   const maxIndex = coords.length - 1;
   const clampedIndex = Math.max(0, Math.min(index, maxIndex));
@@ -52,15 +59,16 @@ const interpolatedPosition = computed(() => {
   const [lng2, lat2] = coords[ceil];
   const fraction = clampedIndex - floor;
 
-  return [
-    lng1 + (lng2 - lng1) * fraction,
-    lat1 + (lat2 - lat1) * fraction,
-  ];
+  // Use corrected longitude wrapping to prevent "long way around"
+  const correctedLng2 = correctLngWrap(lng1, lng2);
+  const interpolatedLng = lng1 + (correctedLng2 - lng1) * fraction;
+  const interpolatedLat = lat1 + (lat2 - lat1) * fraction;
+
+  return [interpolatedLng, interpolatedLat];
 });
 
 const currentDateDisplay = computed(() => {
   if (!voyageDetails.value?.events?.length) return "";
-
   const events = voyageDetails.value.events;
   const index = Number(currentEventIndex.value);
   const maxIndex = events.length - 1;
@@ -70,10 +78,7 @@ const currentDateDisplay = computed(() => {
   const ceil = Math.min(Math.ceil(clampedIndex), maxIndex);
 
   if (!events[floor] || !events[ceil]) return "";
-
-  if (floor === ceil) {
-    return new Date(events[floor].date).toLocaleDateString();
-  }
+  if (floor === ceil) return new Date(events[floor].date).toLocaleDateString();
 
   const date1 = new Date(events[floor].date).getTime();
   const date2 = new Date(events[ceil].date).getTime();
@@ -84,25 +89,36 @@ const currentDateDisplay = computed(() => {
 });
 
 // ────────────────────────────────────────────────────────────────
-// Color Generator
+// FIX 2: Generate consistently visible colors
 // ────────────────────────────────────────────────────────────────
-function hashColor(str) {
+function ensureVisibleColor(voyageId) {
   let hash = 0;
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  for (let i = 0; i < voyageId.length; i++) {
+    hash = ((hash << 5) - hash) + voyageId.charCodeAt(i);
+    hash = hash & hash;
   }
-  const h = Math.abs(hash) % 360;
-  const s = 70 + (Math.abs(hash) % 20);
-  const l = 45 + (Math.abs(hash) % 10);
-  return `hsl(${h},${s}%,${l}%)`;
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 85%, 60%)`; // High saturation, medium-high lightness
 }
 
 // ────────────────────────────────────────────────────────────────
-// FIX 3: Ensure animation uses number arithmetic
+// Voyage List Sidebar
+// ────────────────────────────────────────────────────────────────
+const voyageList = computed(() => {
+  if (!geoData.value) return [];
+  return geoData.value.features.map(feature => ({
+    id: feature.properties.id,
+    name: feature.properties.name,
+    shipName: feature.properties.shipName,
+    color: feature.properties.color
+  }));
+});
+
+// ────────────────────────────────────────────────────────────────
+// Animation & Controls
 // ────────────────────────────────────────────────────────────────
 function animate() {
   if (!isPlaying.value || !voyageDetails.value) return;
-
   const totalSteps = voyageDetails.value.events.length - 1;
   currentEventIndex.value = Number(currentEventIndex.value) + 0.01;
 
@@ -110,49 +126,48 @@ function animate() {
     currentEventIndex.value = totalSteps;
     isPlaying.value = false;
   }
-
   animationFrame = requestAnimationFrame(animate);
 }
 
 watch(isPlaying, (playing) => {
-  if (playing) {
-    animate();
-  } else {
-    cancelAnimationFrame(animationFrame);
+  if (playing) animate();
+  else cancelAnimationFrame(animationFrame);
+});
+
+watch([interpolatedPosition, isPlaying], ([pos, playing]) => {
+  if (pos && playing && myGlobe.value) {
+    myGlobe.value.pointOfView({ lat: pos[1], lng: pos[0], altitude: 0.5 }, 100);
   }
 });
 
 // ────────────────────────────────────────────────────────────────
-// Camera Lock Logic
+// Event Actions
 // ────────────────────────────────────────────────────────────────
-watch([interpolatedPosition, isPlaying], ([pos, playing]) => {
-  if (pos && playing && myGlobe.value) {
-    myGlobe.value.pointOfView({
-      lat: pos[1],
-      lng: pos[0],
-      altitude: 0.5
-    }, 100);
-  }
-});
+function showEventDetails(event) {
+  selectedEvent.value = event;
+}
+
+function closeEventDetails() {
+  selectedEvent.value = null;
+}
 
 // ────────────────────────────────────────────────────────────────
 // Voyage Selection
 // ────────────────────────────────────────────────────────────────
 async function selectVoyage(voyageId) {
-  selectedVoyage.value = voyageId;
+  const fullId = `voyage-${voyageId}`;
+  selectedVoyage.value = fullId;
   isPlaying.value = false;
   currentEventIndex.value = 0;
+  selectedEvent.value = null;
+  showVoyageList.value = false;
 
   const res = await fetch(`/api/v1/voyages/${voyageId}/details`);
   voyageDetails.value = await res.json();
 
   const startCoords = selectedPath.value.geometry.coordinates[0][0];
   if (myGlobe.value && startCoords) {
-    myGlobe.value.pointOfView({
-      lat: startCoords[1],
-      lng: startCoords[0],
-      altitude: 1.5
-    }, 1000);
+    myGlobe.value.pointOfView({ lat: startCoords[1], lng: startCoords[0], altitude: 1.5 }, 1000);
   }
 }
 
@@ -161,6 +176,8 @@ function exitSelection() {
   voyageDetails.value = null;
   isPlaying.value = false;
   currentEventIndex.value = 0;
+  selectedEvent.value = null;
+  showVoyageList.value = true;
 
   if (myGlobe.value) {
     myGlobe.value.pointOfView({ lat: 0, lng: 0, altitude: 2.5 }, 1000);
@@ -172,7 +189,7 @@ function togglePlay() {
 }
 
 // ────────────────────────────────────────────────────────────────
-// Globe Initialization
+// FIX 3: Ensure paths render correctly with validation
 // ────────────────────────────────────────────────────────────────
 onMounted(async () => {
   myGlobe.value = Globe()(globeDiv.value)
@@ -186,10 +203,26 @@ onMounted(async () => {
   const res = await fetch("/api/v1/voyages-geo");
   geoData.value = await res.json();
 
-  const paths = geoData.value.features.map(feature => ({
-    coords: feature.geometry.coordinates[0],
-    properties: feature.properties,
-  }));
+  // Validate and ensure visible colors
+  const paths = geoData.value.features
+    .map(feature => {
+      // Ensure valid coordinate pairs
+      const coords = feature.geometry.coordinates[0].filter(
+        coord => coord && typeof coord[0] === 'number' && typeof coord[1] === 'number'
+      );
+
+      // Skip invalid paths
+      if (coords.length < 2) return null;
+
+      // Ensure visible color
+      feature.properties.color = ensureVisibleColor(feature.properties.id);
+
+      return {
+        coords,
+        properties: feature.properties,
+      };
+    })
+    .filter(Boolean); // Remove null entries
 
   myGlobe.value
     .pathsData(paths)
@@ -198,29 +231,18 @@ onMounted(async () => {
     .pathPointLng(p => p[0])
     .pathColor(path => path.properties.color)
     .pathLabel(path => path.properties.name)
-    .pathStroke(2)
+    .pathStroke(2.5) // Thicker for visibility
     .pathDashLength(0.05)
     .pathDashGap(0.02)
     .pathDashAnimateTime(12000)
+    .pathOpacity(0.95) // Ensure opacity
     .onPathClick(path => selectVoyage(path.properties.id.replace('voyage-', '')));
-
-  const startPorts = paths.map(path => ({
-    lat: path.coords[0][1],
-    lng: path.coords[0][0],
-    size: 3,
-    color: path.properties.color,
-  }));
-
-  myGlobe.value
-    .pointsData(startPorts)
-    .pointLat(d => d.lat)
-    .pointLng(d => d.lng)
-    .pointAltitude(0.01)
-    .pointColor(d => d.color)
-    .pointRadius(d => d.size);
 });
 
-watch([voyageDetails, myGlobe], ([details, globe]) => {
+// ────────────────────────────────────────────────────────────────
+// Markers & Boat Updates
+// ────────────────────────────────────────────────────────────────
+watch([voyageDetails, myGlobe, interpolatedPosition], ([details, globe, pos]) => {
   if (!details || !globe) return;
 
   const markers = details.events.map(event => ({
@@ -229,17 +251,40 @@ watch([voyageDetails, myGlobe], ([details, globe]) => {
     activity: event.activity,
     weather: event.weather,
     date: event.date,
+    type: 'event',
+    hasDetails: !!(event.description || event.specialOccurrence),
+    description: event.description || '',
+    special: event.specialOccurrence || ''
   }));
+
+  if (pos) {
+    markers.push({
+      lat: pos[1],
+      lng: pos[0],
+      type: 'boat'
+    });
+  }
 
   globe.htmlElementsData(markers)
     .htmlElement(d => {
-      const el = document.createElement('div');
-      el.className = 'event-marker';
-      el.innerHTML = '📍';
-      el.title = `${d.activity}\n${new Date(d.date).toLocaleDateString()}\nWeather: ${d.weather || 'N/A'}`;
-      el.style.fontSize = '20px';
-      el.style.cursor = 'pointer';
-      return el;
+      if (d.type === 'boat') {
+        const el = document.createElement('div');
+        el.className = 'boat-marker';
+        el.innerHTML = '⛵';
+        el.style.fontSize = '24px';
+        el.style.pointerEvents = 'none';
+        el.style.zIndex = '101';
+        return el;
+      } else {
+        const el = document.createElement('div');
+        el.className = 'event-marker';
+        el.innerHTML = d.hasDetails ? '⭐' : '📍';
+        el.title = `${d.activity}\n${new Date(d.date).toLocaleDateString()}\nWeather: ${d.weather || 'N/A'}`;
+        el.style.fontSize = d.hasDetails ? '24px' : '20px';
+        el.style.cursor = d.hasDetails ? 'pointer' : 'default';
+        if (d.hasDetails) el.onclick = () => showEventDetails(d);
+        return el;
+      }
     })
     .lat(d => d.lat)
     .lng(d => d.lng);
@@ -247,9 +292,38 @@ watch([voyageDetails, myGlobe], ([details, globe]) => {
 </script>
 
 <template>
-  <div ref="globeDiv" style="width: 100vw; height: 100vh;"></div>
+  <div ref="globeDiv" class="globe-container"></div>
 
-  <!-- Exit Button -->
+  <!-- Voyage List Sidebar -->
+  <div class="voyage-list-panel" :class="{ 'mobile-hidden': !showVoyageList && selectedVoyage }">
+    <div class="panel-header">
+      <h2>Voyages</h2>
+      <button
+        v-if="selectedVoyage"
+        @click="showVoyageList = !showVoyageList"
+        class="toggle-btn"
+      >
+        {{ showVoyageList ? '−' : '+' }}
+      </button>
+    </div>
+    <div class="voyage-list">
+      <div
+        v-for="voyage in voyageList"
+        :key="voyage.id"
+        @click="selectVoyage(voyage.id.replace('voyage-', ''))"
+        class="voyage-item"
+        :class="{ active: selectedVoyage === voyage.id }"
+      >
+        <div class="voyage-color" :style="{ backgroundColor: voyage.color }"></div>
+        <div class="voyage-info">
+          <div class="voyage-name">{{ voyage.name }}</div>
+          <div class="voyage-ship">{{ voyage.shipName }}</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- FIX 3: Exit Button with higher z-index and visible styling -->
   <button v-if="selectedVoyage" @click="exitSelection" class="exit-btn">
     ✕ Exit Voyage
   </button>
@@ -280,46 +354,158 @@ watch([voyageDetails, myGlobe], ([details, globe]) => {
     <span class="date-display">{{ currentDateDisplay }}</span>
   </div>
 
-  <!-- Boat Marker (uses Globe.gl's HTML elements layer) -->
-  <div v-if="interpolatedPosition" class="boat-marker"
-       :style="{
-         position: 'absolute',
-         transform: 'translate(-50%, -50%)',
-         left: '50%',
-         top: '50%',
-         zIndex: 100,
-         pointerEvents: 'none'
-       }">
-    ⛵
+  <!-- Event Detail Popup -->
+  <div v-if="selectedEvent" class="event-popup" @click="closeEventDetails">
+    <div class="event-popup-content" @click.stop>
+      <button class="close-popup" @click="closeEventDetails">✕</button>
+      <h4>{{ selectedEvent.activity }}</h4>
+      <p><strong>Date:</strong> {{ new Date(selectedEvent.date).toLocaleDateString() }}</p>
+      <p><strong>Weather:</strong> {{ selectedEvent.weather || 'N/A' }}</p>
+      <p v-if="selectedEvent.description"><strong>Details:</strong> {{ selectedEvent.description }}</p>
+      <p v-if="selectedEvent.special"><strong>⚠️ Special Note:</strong> {{ selectedEvent.special }}</p>
+    </div>
   </div>
 </template>
 
-
 <style>
-/* Reset box model */
 * {
   box-sizing: border-box;
+  margin: 0;
+  padding: 0;
 }
 
-/* Exit Button */
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+  overflow: hidden;
+}
+
+.globe-container {
+  width: 100vw;
+  height: 100vh;
+}
+
+/* Voyage List Panel */
+.voyage-list-panel {
+  position: absolute;
+  top: 20px;
+  left: 20px;
+  width: 320px;
+  max-height: 80vh;
+  background: rgba(15, 23, 42, 0.9);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(94, 234, 212, 0.2);
+  border-radius: 12px;
+  z-index: 1000;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.3s ease;
+}
+
+.panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-bottom: 1px solid rgba(94, 234, 212, 0.2);
+}
+
+.panel-header h2 {
+  color: #5eead4;
+  font-size: 1.25rem;
+  margin: 0;
+}
+
+.toggle-btn {
+  background: rgba(94, 234, 212, 0.2);
+  border: 1px solid #5eead4;
+  border-radius: 6px;
+  color: #5eead4;
+  width: 30px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 18px;
+  display: none;
+}
+
+.voyage-list {
+  overflow-y: auto;
+  max-height: calc(80vh - 70px);
+  padding: 8px;
+}
+
+.voyage-item {
+  display: flex;
+  align-items: center;
+  padding: 12px;
+  margin-bottom: 8px;
+  background: rgba(30, 41, 59, 0.6);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.voyage-item:hover {
+  background: rgba(51, 65, 85, 0.8);
+  transform: translateX(4px);
+}
+
+.voyage-item.active {
+  background: rgba(94, 234, 212, 0.2);
+  border: 1px solid #5eead4;
+}
+
+.voyage-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  margin-right: 12px;
+  flex-shrink: 0;
+}
+
+.voyage-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.voyage-name {
+  color: #f8fafc;
+  font-weight: 500;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.voyage-ship {
+  color: #cbd5e1;
+  font-size: 0.8rem;
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* FIX 3: Exit Button - moved to top-right with high z-index */
 .exit-btn {
   position: absolute;
   top: 20px;
   right: 20px;
   padding: 12px 24px;
-  background: rgba(15, 23, 42, 0.9);
-  color: #e2e8f0;
-  border: 1px solid rgba(94, 234, 212, 0.3);
+  background: rgba(220, 38, 38, 0.95); /* Red for visibility */
+  color: #ffffff;
+  border: 2px solid rgba(255, 255, 255, 0.3);
   border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
-  z-index: 1000;
+  z-index: 2000; /* Highest z-index */
   transition: all 0.3s ease;
   backdrop-filter: blur(10px);
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
 }
 
 .exit-btn:hover {
-  background: rgba(220, 38, 38, 0.9);
+  background: rgba(239, 68, 68, 1);
   transform: scale(1.05);
 }
 
@@ -327,7 +513,7 @@ watch([voyageDetails, myGlobe], ([details, globe]) => {
 .info-panel {
   position: absolute;
   top: 20px;
-  left: 20px;
+  right: 20px;
   padding: 24px;
   background: rgba(15, 23, 42, 0.9);
   color: #e2e8f0;
@@ -378,6 +564,7 @@ watch([voyageDetails, myGlobe], ([details, globe]) => {
   backdrop-filter: blur(10px);
   border: 1px solid rgba(94, 234, 212, 0.2);
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+  flex-wrap: wrap;
 }
 
 .play-btn {
@@ -390,6 +577,7 @@ watch([voyageDetails, myGlobe], ([details, globe]) => {
   cursor: pointer;
   color: #5eead4;
   transition: all 0.3s ease;
+  flex-shrink: 0;
 }
 
 .play-btn:hover {
@@ -404,6 +592,8 @@ watch([voyageDetails, myGlobe], ([details, globe]) => {
   border-radius: 3px;
   outline: none;
   -webkit-appearance: none;
+  min-width: 200px;
+  flex: 1;
 }
 
 .timeline-slider::-webkit-slider-thumb {
@@ -432,11 +622,12 @@ watch([voyageDetails, myGlobe], ([details, globe]) => {
   color: #5eead4;
   min-width: 120px;
   text-align: right;
+  flex-shrink: 0;
 }
 
-/* Event Markers (when selected) */
+/* Markers */
 :global(.event-marker) {
-  font-size: 24px;
+  font-size: 20px;
   cursor: pointer;
   transition: transform 0.2s ease;
   filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.8));
@@ -444,5 +635,160 @@ watch([voyageDetails, myGlobe], ([details, globe]) => {
 
 :global(.event-marker:hover) {
   transform: scale(1.3);
+}
+
+:global(.boat-marker) {
+  font-size: 24px;
+  filter: drop-shadow(0 2px 6px rgba(0, 0, 0, 0.9));
+  pointer-events: none;
+  z-index: 101;
+}
+
+/* Event Detail Popup */
+.event-popup {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.7);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.event-popup-content {
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid #5eead4;
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 400px;
+  color: #e2e8f0;
+  position: relative;
+}
+
+.close-popup {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: none;
+  border: none;
+  color: #5eead4;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+.event-popup-content h4 {
+  color: #5eead4;
+  margin-bottom: 16px;
+  font-size: 1.2rem;
+}
+
+.event-popup-content p {
+  margin: 8px 0;
+  line-height: 1.5;
+}
+
+.event-popup-content strong {
+  color: #5eead4;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .voyage-list-panel {
+    width: 100%;
+    max-width: 300px;
+    top: auto;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    max-height: 40vh;
+    transform: translateY(calc(100% - 60px));
+    border-radius: 12px 12px 0 0;
+  }
+
+  .voyage-list-panel:not(.mobile-hidden) {
+    transform: translateY(0);
+  }
+
+  .toggle-btn {
+    display: block;
+  }
+
+  .info-panel {
+    top: auto;
+    bottom: 100px;
+    left: 10px;
+    right: 10px;
+    max-width: none;
+  }
+
+  .timeline-controls {
+    bottom: 10px;
+    left: 10px;
+    right: 10px;
+    transform: none;
+    padding: 15px 20px;
+    gap: 10px;
+  }
+
+  .timeline-slider {
+    width: 100%;
+    min-width: auto;
+  }
+
+  .exit-btn {
+    top: 10px;
+    right: 10px;
+    padding: 10px 16px;
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .timeline-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 15px;
+  }
+
+  .play-btn {
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
+  }
+
+  .date-display {
+    text-align: center;
+  }
+
+  .info-panel {
+    padding: 15px;
+  }
+
+  .info-panel h3 {
+    font-size: 1.2rem;
+  }
+
+  .event-popup-content {
+    margin: 20px;
+    max-width: none;
+  }
+}
+
+/* Scrollbar Styling */
+.voyage-list::-webkit-scrollbar {
+  width: 8px;
+}
+
+.voyage-list::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+  border-radius: 4px;
+}
+
+.voyage-list::-webkit-scrollbar-thumb {
+  background: #5eead4;
+  border-radius: 4px;
 }
 </style>
