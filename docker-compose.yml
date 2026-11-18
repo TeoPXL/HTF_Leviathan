@@ -1,37 +1,34 @@
-# HTF Leviathan — local development stack.
-# Production runs on Kubernetes (deploy/k8s, docs/deployment.md); this file is for local use.
-#
-#   cp .env.example db.env      # then fill in local values
-#   docker compose up --build   # http://localhost:8899
-#   docker compose --profile admin up phpmyadmin-htf   # optional, http://127.0.0.1:8888
-#
-# The db-init service applies migrations and imports seed data. Both steps are idempotent:
-# re-running never drops tables or duplicates data. The API itself never touches the schema.
+version: '3.8'
 
 services:
   traefik-htf:
-    image: traefik:v3.5.6
+    image: traefik:latest
     container_name: traefik-htf
     command:
       - --configFile=/etc/traefik/traefik.yml
+      - --experimental.plugins.dynamic-jwt-validation.modulename=github.com/antoniomika/dynamic-jwt-validation
     ports:
-      - "8899:80"
+      - "80:80"
+      - "443:443"
     volumes:
-      - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
-      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+      - ./traefik/traefik.yml:/etc/traefik/traefik.yml
+      - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml
+    networks:
+      - default
     environment:
       TZ: GMT
     restart: unless-stopped
     depends_on:
-      vue-htf:
-        condition: service_started
-      api-htf:
-        condition: service_started
+      - db-htf
+      - vue-htf
+      - api-htf
     healthcheck:
-      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      test: [ "CMD", "curl", "-f", "http://localhost:80/ping" ]
       interval: 10s
       timeout: 10s
       retries: 5
+    env_file:
+      - jwt.env
     deploy:
       resources:
         limits:
@@ -39,68 +36,47 @@ services:
           memory: "256MB"
 
   db-htf:
-    image: mariadb:11.8.9
     container_name: db-htf
+    build:
+      context: ./db
+      dockerfile: Dockerfile
     volumes:
       - htf_db_data:/var/lib/mysql
     env_file:
       - db.env
+      - jwt.env
+    networks:
+      - default
     environment:
       TZ: GMT
     healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      test: ["CMD", "bash", "-c", "mariadb-admin ping -h 127.0.0.1 -u $$MARIADB_USER -p$$MARIADB_PASSWORD"]
       interval: 10s
       timeout: 10s
-      retries: 10
-      start_period: 20s
+      retries: 5
     deploy:
       resources:
         limits:
           cpus: "1.0"
           memory: "1024MB"
 
-  # One-shot: apply pending migrations, then import seed files not yet imported.
-  # For a volume created by the old setup (tables but no migration/seed history), run once with
-  #   MIGRATE_BASELINE_EXISTING=true SEED_ADOPT_EXISTING=true docker compose up db-init-htf
-  db-init-htf:
-    build:
-      context: ./api
-      dockerfile: Dockerfile
-    image: htf-leviathan-api:local
-    container_name: db-init-htf
-    command: ["sh", "-c", "bun src/db/migrate.ts && bun src/db/seed.ts"]
-    restart: "no"
-    depends_on:
-      db-htf:
-        condition: service_healthy
-    env_file:
-      - db.env
-    environment:
-      TZ: GMT
-      MIGRATE_BASELINE_EXISTING: ${MIGRATE_BASELINE_EXISTING:-false}
-      SEED_ADOPT_EXISTING: ${SEED_ADOPT_EXISTING:-false}
-
   api-htf:
+    container_name: api-htf
     build:
       context: ./api
       dockerfile: Dockerfile
-    image: htf-leviathan-api:local
-    container_name: api-htf
     depends_on:
       db-htf:
         condition: service_healthy
-      db-init-htf:
-        condition: service_completed_successfully
     env_file:
       - db.env
+      - jwt.env
+    networks:
+      - default
     environment:
       TZ: GMT
-      # Keep the original hackathon behaviour locally: 300-750 ms artificial latency.
-      CHAOS_DELAY_ENABLED: "true"
-      SWAGGER_ENABLED: "true"
-    stop_grace_period: 15s
     healthcheck:
-      test: ["CMD", "bun", "health-check.js"]
+      test: [ "CMD", "bun", "run", "health-check.js" ]
       interval: 10s
       timeout: 10s
       retries: 5
@@ -108,44 +84,54 @@ services:
       resources:
         limits:
           cpus: "1.0"
-          memory: "512MB"
+          memory: "2048MB"
 
   vue-htf:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: htf-leviathan-frontend:local
     container_name: vue-htf
+    networks:
+      - default
     environment:
       TZ: GMT
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1"]
+      test: ["CMD", "bun", "run", "health-check.js"]
       interval: 10s
-      timeout: 5s
+      timeout: 10s
       retries: 5
     deploy:
       resources:
         limits:
           cpus: "0.25"
-          memory: "128MB"
+          memory: "256MB"
 
-  # Optional database UI, local only (bound to 127.0.0.1). Start with --profile admin.
   phpmyadmin-htf:
-    image: phpmyadmin:5.2
-    profiles: ["admin"]
+    image: phpmyadmin/phpmyadmin:latest
+    #profiles: ["admin"] (Run this locally only)
     container_name: phpmyadmin-htf
     environment:
       PMA_HOST: db-htf
     ports:
-      - "127.0.0.1:8888:80"
+      - "8888:80"
+    env_file:
+      - db.env
+      - jwt.env
     depends_on:
       db-htf:
         condition: service_healthy
+    networks:
+      - default
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:8080" ]
+      interval: 10s
+      timeout: 10s
+      retries: 5
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: "256MB"
+          cpus: "1"
+          memory: "512MB"
 
 networks:
   default:

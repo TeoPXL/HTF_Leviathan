@@ -1,24 +1,43 @@
-# Traefik dynamic configuration for the LOCAL Docker Compose stack only.
-#   /api/*  → API (prefix stripped; the API serves /v1/..., /health, /swagger)
-#   /*      → frontend (nginx handles caching headers and SPA fallback)
 http:
   routers:
+    # === Existing routers ===
     api-router:
       rule: "PathPrefix(`/api`)"
       service: api-service
       middlewares:
-        - strip-api-prefix
-        - compress
+        - compress-strip
       entryPoints:
         - web
 
     frontend-router:
       rule: "PathPrefix(`/`)"
       service: frontend-service
+      middlewares:
+        - frontend-chain
+      entryPoints:
+        - web
+
+    ping-router:
+      rule: "Path(`/ping`)"
+      service: ping-service
+      middlewares:
+        - compress
       entryPoints:
         - web
 
   middlewares:
+    compress-strip:
+      chain:
+        middlewares:
+          - strip-api-prefix
+          - compress
+
+    frontend-chain:
+      chain:
+        middlewares:
+          - compress
+          - static-assets-cache
+
     compress:
       compress: {}
 
@@ -26,6 +45,11 @@ http:
       stripPrefix:
         prefixes:
           - "/api"
+
+    static-assets-cache:
+      headers:
+        customResponseHeaders:
+          Cache-Control: "public, max-age=31536000, immutable"
 
   services:
     api-service:
@@ -37,5 +61,11 @@ http:
     frontend-service:
       loadBalancer:
         servers:
-          - url: "http://vue-htf:8080"
+          - url: "http://vue-htf:81"
+        passHostHeader: true
+
+    ping-service:
+      loadBalancer:
+        servers:
+          - url: "http://traefik-htf:80"
         passHostHeader: true

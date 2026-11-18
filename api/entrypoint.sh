@@ -1,8 +1,19 @@
 #!/bin/sh
-set -e
 
-# Normal runtime entrypoint: start the API only.
-# It never installs packages, drops tables, migrates or seeds the database.
-# Database initialisation is an explicit, separate step (docs/deployment.md).
-echo "Starting HTF Leviathan API..."
-exec bun src/index.ts
+bun add drizzle-kit
+
+#REMOVE EXISTING
+echo "Dropping all tables before migration..."
+bun run src/services/clear_database.ts
+
+# MIGRATE
+echo "Migrating..."
+bun drizzle-kit push --force
+
+echo "converting database data..."
+bun run src/services/insert.ts
+
+
+# Start the application
+echo "Starting application..."
+bun src/index.ts

@@ -59,14 +59,3 @@ export const events = mysqlTable("events", {
     motivationLevels: int("motivation_levels").default(0),
     casualties: int("casualties").default(0),
 })
-
-/* ──────────────────────────────────────────────────────────────── */
-/* Seed history (records which seed files were imported, so the    */
-/* seed job never imports the same file twice). See src/db/seed.ts */
-/* ──────────────────────────────────────────────────────────────── */
-
-export const seedHistory = mysqlTable("seed_history", {
-    name: varchar("name", { length: 255 }).primaryKey(),
-    checksum: varchar("checksum", { length: 64 }).notNull(),
-    appliedAt: datetime("applied_at").notNull().default(sql`CURRENT_TIMESTAMP`),
-})

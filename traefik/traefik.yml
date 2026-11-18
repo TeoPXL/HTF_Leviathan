@@ -1,31 +1,22 @@
-# Traefik static configuration for the LOCAL Docker Compose stack only.
-# Kubernetes uses the K3s-managed Traefik and the Ingress in deploy/k8s.
-#
-# The experimental JWT plugins that used to be declared here (agilezebra/jwt-middleware and
-# antoniomika/dynamic-jwt-validation) were never attached to any router in dynamic.yml, so
-# they protected nothing; they were removed. See docs/kubernetes-migration.md (Security).
-
 entryPoints:
   web:
     address: ":80"
     transport:
       respondingTimeouts:
-        readTimeout: 30s
-        # Must exceed the OpenAI timeout (20 s) plus artificial latency for captain chat.
-        writeTimeout: 60s
-        idleTimeout: 60s
+        readTimeout: 10s
+        writeTimeout: 10s
+        idleTimeout: 30s
+
+  websecure:
+    address: ":443"
 
   metrics:
     address: ":8082"
 
-ping:
-  entryPoint: web
-
 log:
   level: INFO
   format: json
-
-accessLog: {}
+  filePath: "/var/log/traefik.log"
 
 metrics:
   prometheus:
@@ -33,6 +24,14 @@ metrics:
     addEntryPointsLabels: true
     addServicesLabels: true
     addRoutersLabels: true
+    manualRouting: true
+    headerLabels:
+      useragent: "User-Agent"
+      contenttype: "Content-Type"
+      referer: "Referer"
+      host: "Host"
+      xforwardedfor: "X-Forwarded-For"
+      requestid: "X-Request-Id"
     buckets:
       - 0.1
       - 0.3
@@ -43,3 +42,18 @@ providers:
   file:
     filename: /etc/traefik/dynamic.yml
     watch: true
+
+# Uncomment for production
+# certificatesResolvers:
+#   letsencrypt:
+#     acme:
+#       email: your-email@example.com
+#       storage: /etc/traefik/acme.json
+#       httpChallenge:
+#         entryPoint: web
+
+experimental:
+  plugins:
+    jwt:
+      moduleName: github.com/agilezebra/jwt-middleware
+      version: v1.3.4

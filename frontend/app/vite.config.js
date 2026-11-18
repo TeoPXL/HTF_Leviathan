@@ -17,9 +17,7 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': fileURLToPath(new URL('./src', import.meta.url)),
-      // three-globe's package "exports" hide its example textures, so point at them directly.
-      '@globe-textures': fileURLToPath(new URL('./node_modules/three-globe/example/img', import.meta.url)),
+      '@': fileURLToPath(new URL('./src', import.meta.url))
     },
   },
 })

@@ -1,87 +1,123 @@
 // src/middleware/chaos.ts
-// Artificial latency / error injection from the original hackathon setup.
-// Controlled by environment variables (see src/config.ts). Disabled by default;
-// Docker Compose enables the delay to preserve the original local behaviour.
 import { Elysia } from "elysia"
-import { config } from "../config"
 
 export type ChaosOptions = {
+    // Delay settings
     delayEnabled: boolean
-    minDelay: number // ms
-    maxDelay: number // ms
-    delayProbability: number // 0-1
+    minDelay: number // Minimum delay in ms
+    maxDelay: number // Maximum delay in ms
+    delayProbability: number // 0-1, chance of delay being applied
 
+    // Error settings
     errorEnabled: boolean
-    errorProbability: number // 0-1
-    statusCodes: number[]
+    errorProbability: number // 0-1, chance of error being triggered
+    statusCodes: number[] // Array of status codes to randomly select from
 
-    includePaths: string[] // regex patterns
-    excludePaths: string[] // regex patterns
+    // Path filters
+    includePaths: string[] // Paths to include (supports regex patterns)
+    excludePaths: string[] // Paths to exclude (supports regex patterns)
 }
 
+// Configure these values directly in code according to your needs
 export const CHAOS_CONFIG: ChaosOptions = {
-    delayEnabled: config.chaos.delayEnabled,
-    minDelay: config.chaos.minDelayMs,
-    maxDelay: config.chaos.maxDelayMs,
-    delayProbability: 1.0,
+    // Delay configuration - THESE ARE NOW SET FOR GUARANTEED DELAYS
+    delayEnabled: true,
+    minDelay: 300,
+    maxDelay: 750,
+    delayProbability: 1.0, // 100% chance of delay
 
-    errorEnabled: config.chaos.errorsEnabled,
+    // Error configuration
+    errorEnabled: false,
     errorProbability: 0.2,
     statusCodes: [400, 401, 403, 404, 429, 500, 502, 503],
 
-    includePaths: [".*"],
-    // Never slow down or break probes, metrics or docs.
-    excludePaths: ["/health", "/ready", "/metrics", "/swagger.*"],
+    // Path configuration
+    includePaths: [".*"], // Include all paths by default
+    excludePaths: ["/health", "/metrics", "/swagger.*"], // Exclude monitoring endpoints
 }
 
-const includeRegexes = CHAOS_CONFIG.includePaths.map((p) => new RegExp(`^${p}$`))
-const excludeRegexes = CHAOS_CONFIG.excludePaths.map((p) => new RegExp(`^${p}$`))
-
-const debug = (...args: unknown[]) => {
-    if (config.chaos.debugLogging) console.log(...args)
-}
-
+// Helper to check if a path should have chaos applied
 function shouldApplyChaos(path: string): boolean {
-    const result = includeRegexes.some((r) => r.test(path)) && !excludeRegexes.some((r) => r.test(path))
-    debug(`🧠 Chaos decision for ${path}: ${result ? "APPLY" : "SKIP"}`)
+    const matchesInclude = CHAOS_CONFIG.includePaths.some(pattern =>
+        new RegExp(`^${pattern}$`).test(path))
+
+    const matchesExclude = CHAOS_CONFIG.excludePaths.some(pattern =>
+        new RegExp(`^${pattern}$`).test(path))
+
+    const result = matchesInclude && !matchesExclude
+    console.log(`🧠 Chaos decision for ${path}: ${result ? 'APPLY' : 'SKIP'}`)
+    console.log(`  - Included: ${matchesInclude}, Excluded: ${matchesExclude}`)
     return result
 }
 
+// Safe random integer function (using Math.random since randomInt might be an issue)
 function getRandomInt(min: number, max: number): number {
     min = Math.ceil(min)
     max = Math.floor(max)
     return Math.floor(Math.random() * (max - min + 1)) + min
 }
 
+// Middleware function
 export function chaosMiddleware() {
-    const app = new Elysia({ name: "chaos" })
-    if (!CHAOS_CONFIG.delayEnabled && !CHAOS_CONFIG.errorEnabled) return app
+    console.log("🔥 Initializing chaos middleware with config:", CHAOS_CONFIG)
 
-    console.log(
-        `🔥 Chaos middleware enabled (delay=${CHAOS_CONFIG.delayEnabled} ` +
-        `${CHAOS_CONFIG.minDelay}-${CHAOS_CONFIG.maxDelay}ms, errors=${CHAOS_CONFIG.errorEnabled})`,
-    )
-
-    return app
+    return new Elysia()
         .onRequest(async ({ request }) => {
-            if (!CHAOS_CONFIG.delayEnabled) return
             const path = new URL(request.url).pathname
-            if (!shouldApplyChaos(path)) return
-            if (Math.random() < CHAOS_CONFIG.delayProbability) {
-                const delayTime = getRandomInt(CHAOS_CONFIG.minDelay, CHAOS_CONFIG.maxDelay)
-                debug(`🐌 Adding artificial delay of ${delayTime}ms to ${path}`)
-                await Bun.sleep(delayTime)
+            console.log(`👉 Request received for path: ${path}`)
+
+            if (!shouldApplyChaos(path)) {
+                console.log(`⏩ Skipping chaos for excluded path: ${path}`)
+                return
+            }
+
+            // Apply artificial delay if enabled and probability check passes
+            if (CHAOS_CONFIG.delayEnabled) {
+                const randomValue = Math.random()
+                console.log(`🎲 Delay probability check: ${randomValue} vs threshold ${CHAOS_CONFIG.delayProbability}`)
+
+                if (randomValue < CHAOS_CONFIG.delayProbability) {
+                    const delayTime = getRandomInt(CHAOS_CONFIG.minDelay, CHAOS_CONFIG.maxDelay)
+                    console.log(`🐌 Adding artificial delay of ${delayTime}ms to ${path}`)
+
+                    // Use a more explicit delay approach
+                    await new Promise<void>((resolve) => {
+                        console.log(`⏱️ Delay timer started at ${new Date().toISOString()}`)
+                        setTimeout(() => {
+                            console.log(`⏱️ Delay timer completed at ${new Date().toISOString()}`)
+                            resolve()
+                        }, delayTime)
+                    })
+
+                    console.log(`✅ Delay completed for ${path}`)
+                } else {
+                    console.log(`⏩ Skipping delay (probability check failed)`)
+                }
+            } else {
+                console.log(`⏩ Delays are disabled in config`)
             }
         })
-        .onAfterHandle({ as: "global" }, ({ request, set }) => {
-            if (!CHAOS_CONFIG.errorEnabled) return
+        .onAfterHandle(({ request, set }) => {
             const path = new URL(request.url).pathname
-            if (!shouldApplyChaos(path)) return
-            if (Math.random() < CHAOS_CONFIG.errorProbability) {
-                const statusCode = CHAOS_CONFIG.statusCodes[getRandomInt(0, CHAOS_CONFIG.statusCodes.length - 1)]
-                debug(`💥 Generating artificial error with status ${statusCode} for ${path}`)
-                set.status = statusCode
-                return { error: "Artificial error generated by chaos middleware", status: statusCode, path }
+
+            // Apply errors after handling (but before sending response)
+            if (CHAOS_CONFIG.errorEnabled && shouldApplyChaos(path)) {
+                const randomValue = Math.random()
+                console.log(`🎲 Error probability check: ${randomValue} vs threshold ${CHAOS_CONFIG.errorProbability}`)
+
+                if (randomValue < CHAOS_CONFIG.errorProbability) {
+                    const statusCode = CHAOS_CONFIG.statusCodes[
+                        getRandomInt(0, CHAOS_CONFIG.statusCodes.length - 1)
+                        ]
+                    console.log(`💥 Generating artificial error with status ${statusCode} for ${path}`)
+
+                    set.status = statusCode
+                    return {
+                        error: `Artificial error generated by chaos middleware`,
+                        status: statusCode,
+                        path: path
+                    }
+                }
             }
         })
 }

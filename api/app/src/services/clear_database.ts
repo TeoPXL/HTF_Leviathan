@@ -1,24 +1,8 @@
-// DESTRUCTIVE local-development tool: drops ALL tables in the configured database.
-// It is never run automatically, is excluded from the API container image
-// (api/.dockerignore), and refuses to run unless you confirm the exact database name:
-//
-//   CONFIRM_DROP_ALL_TABLES=<database name> bun run src/services/clear_database.ts
-//
-// Take a backup first (docs/database-backup-restore.md).
 import mysql from "mysql2/promise";
 import { setupDatabase } from "../db/connect";
 
 async function clearDatabase() {
     const db = await setupDatabase();
-
-    const [[{ dbName }]] = (await db.execute(`SELECT DATABASE() AS dbName`)) as any;
-    if (!dbName || process.env.CONFIRM_DROP_ALL_TABLES !== dbName) {
-        console.error(
-            `Refusing to drop tables. Set CONFIRM_DROP_ALL_TABLES=${dbName ?? "<database>"} to confirm.`,
-        );
-        await (db.$client as mysql.Pool).end();
-        process.exit(1);
-    }
 
     // Get all table names
     const result = await db.execute(`

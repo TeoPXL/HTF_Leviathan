@@ -1,30 +1,32 @@
-# syntax=docker/dockerfile:1
-# HTF Leviathan frontend (Vue 3 + Vite) served as static files by unprivileged nginx.
-# Build context: ./frontend   →   docker build -t htf-leviathan-frontend ./frontend
+# Step 1: Build stage
+FROM oven/bun:alpine AS build
 
-ARG BUN_VERSION=1.4.2
-ARG NGINX_VERSION=1.28.2
-
-# ── Build ─────────────────────────────────────────────────────────
-FROM oven/bun:${BUN_VERSION}-alpine AS build
+# Set working directory in the container
 WORKDIR /app
 
-# Install exactly what the lockfile specifies (cached unless deps change).
+# Copy package.json and bun.lockb first for better caching
 COPY app/package.json app/bun.lock ./
+
+# Install dependencies with Bun
 RUN bun install --frozen-lockfile
 
+# Copy the rest of the project files (including src, public, etc.)
 COPY app/ ./
-RUN bun run build
 
-# ── Runtime ───────────────────────────────────────────────────────
-# Runs as uid 101 and listens on 8080 (no root, no privileged port).
-FROM nginxinc/nginx-unprivileged:${NGINX_VERSION}-alpine AS runtime
+# Build the Vue.js app
+RUN bun run --verbose build
+# Step 2: Production stage
+FROM oven/bun:alpine
 
-COPY nginx/default.conf /etc/nginx/conf.d/default.conf
-COPY nginx/security-headers.conf /etc/nginx/snippets/security-headers.conf
-COPY --from=build /app/dist /usr/share/nginx/html
+WORKDIR /app
 
-EXPOSE 8080
+# Copy only the built files
+COPY --from=build /app/dist ./dist
 
-HEALTHCHECK --interval=15s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget -q -O /dev/null http://127.0.0.1:8080/healthz || exit 1
+COPY app/health-check.js ./health-check.js
+
+# Install serve globally
+RUN bun add -g serve
+
+# Start the app on port 81
+CMD ["serve", "-s", "dist", "-l", "81"]

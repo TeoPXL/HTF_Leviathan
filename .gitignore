@@ -8,8 +8,3 @@ db.env
 grafana.env
 *.env
 api/app/node_modules/
-# Build checks and local tooling
-api/app/.build-check/
-# Never commit real secrets for Kubernetes (only *.example files are tracked)
-deploy/k8s/secrets/*
-!deploy/k8s/secrets/*.example

@@ -1,9 +1,0 @@
-# Explicit database initialisation jobs (migrate + seed), using the same image tags.
-#   kubectl apply -k deploy/k8s/overlays/production/jobs
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-namespace: htf-leviathan
-resources:
-  - ../../../jobs
-components:
-  - ../images
